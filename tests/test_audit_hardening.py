@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 try:
-    import price_action_ai_v1_7_5_audit_hardening as audit
+    import price_action_ai_v1_7_5_audit_hardening_r2 as audit
 except Exception:
     audit = None
 
@@ -21,7 +21,7 @@ def _df(times):
 
 
 def test_module_exists():
-    assert audit is not None, 'ADE-9 audit hardening module is not implemented yet'
+    assert audit is not None, 'ADE-9 audit hardening r2 module is not implemented yet'
 
 
 def test_unexpected_multiday_gap_splits_segment_and_resets_active_window():
@@ -98,8 +98,51 @@ def test_count_audit_dedupes_removed_and_exposes_right_edge_provisional():
     assert result['invariant_ok'] is True
 
 
+def test_count_audit_accepts_direct_removed_pivot_records():
+    assert audit is not None
+    structural = [
+        {'index': 1, 'kind': 'SH', 'price': 10.0},
+        {'index': 2, 'kind': 'SL', 'price': 8.0},
+        {'index': 3, 'kind': 'SH', 'price': 11.0},
+    ]
+    major = [structural[0], structural[2]]
+    removed = [dict(structural[1])]
+    result = audit.audit_counts(structural, major, removed)
+    assert result['removed_unique'] == 1
+    assert result['unaccounted'] == 0
+    assert result['invariant_ok'] is True
+
+
 def test_raw_structural_diagnostic_explicitly_reports_zero_filtering():
     assert audit is not None
     diag = audit.structural_filter_audit(raw_count=43, structural_count=43)
     assert diag['removed'] == 0
     assert diag['label'] == 'NO_STRUCTURAL_REMOVAL'
+
+
+def test_fixed_snapshot_loader_roundtrip(tmp_path):
+    assert audit is not None
+    df = _df([
+        '2026-08-03 00:00', '2026-08-03 00:30', '2026-08-03 01:00',
+        '2026-08-20 10:00', '2026-08-20 10:30', '2026-08-20 11:00',
+    ])
+    path = tmp_path / 'PriceActionAI_snapshot_NZDUSD_o_M30_6.csv'
+    df.to_csv(path, index=False)
+    loaded = audit.load_snapshot_file(path)
+    assert len(loaded) == 6
+    assert list(loaded.columns[:5]) == ['time', 'open', 'high', 'low', 'close']
+    result = audit.segment_on_unexpected_gaps(loaded, 'M30')
+    assert len(result['segments']) == 2
+    assert len(result['active_segment']) == 3
+
+
+def test_fixed_snapshot_rejects_missing_ohlc_columns(tmp_path):
+    assert audit is not None
+    path = tmp_path / 'bad.csv'
+    pd.DataFrame({'time': ['2026-08-20 10:00'], 'close': [1.0]}).to_csv(path, index=False)
+    try:
+        audit.load_snapshot_file(path)
+    except ValueError as exc:
+        assert 'missing required columns' in str(exc).lower()
+    else:
+        raise AssertionError('Expected missing-column snapshot validation failure')
