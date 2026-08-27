@@ -19,6 +19,15 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pip pytest pandas plotly
       - name: Compile locked Swing and Leg baseline
-        run: python -m py_compile src/price_action_ai_swing_v1.py src/price_action_ai_leg_v0.py
-      - name: Run Swing lock and Leg baseline regression
-        run: pytest -q tests/test_swing_v1_lock.py tests/test_leg_v0_baseline.py
+        run: python -m py_compile src/price_action_ai_swing_v1.py src/price_action_ai_leg_v0.py research/leg_v0_visual_validation.py
+      - name: Run Swing lock and Leg regression
+        run: pytest -q tests/test_swing_v1_lock.py tests/test_leg_v0_baseline.py tests/test_leg_v0_real_snapshot.py
+      - name: Generate real-data visual validation artifact
+        run: python research/leg_v0_visual_validation.py
+      - name: Upload Leg v0 visual validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: leg-v0-nzdusd-m30-visual-validation
+          path: |
+            artifacts/PriceActionAI_Leg_v0_NZDUSD_M30_500.html
+            artifacts/PriceActionAI_Leg_v0_NZDUSD_M30_500.csv
