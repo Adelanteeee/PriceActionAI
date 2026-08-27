@@ -10,18 +10,44 @@ Rule-based multi-timeframe Price Action trading system with locked definitions, 
 
 ## Governing rule
 
-No downstream module may silently change a locked upstream definition. Any change to a Done/Locked module requires an explicit change request plus regression testing.
+No downstream module may silently change a locked upstream definition. Any change to a Done/Locked module requires an explicit Change Request plus regression testing.
 
-## Current active work
+## Current project state
 
-- **Sprint 1 — Swing Engine**
-- Active task: **ADE-5 — Validate Swing candidates on XAUUSD M5**
+- **Sprint 1 — Swing Engine: Locked**
+- Production baseline: `src/price_action_ai_swing_v1.py`
+- Market logic: **v1.7.5 Clean Baseline**
+- Data-integrity/audit hardening: **ADE-9 included**
+- v1.7.6 Depth × Time: **Experiment Failed — Not Adopted** (research archived)
+- Next: **Sprint 2 — Leg Engine**
+
+## Swing v1 lock contract
+
+Leg Engine may consume Swing Engine output but may not silently modify:
+- Structural Swing sequence
+- Reference Leg definition
+- Major Swing classification
+- Temporal Gate
+- Extreme Carry-Forward
+- Data Integrity boundaries
+
+Any change requires an explicit Change Request plus Sprint 1 regression.
 
 ## Canonical references
 
 - Master Blueprint: https://docs.google.com/document/d/1mLzBoUT4JE992IMsyCjHIiGhAXsg_FdSXoSJFwJ6bzI
 - Linear Project: https://linear.app/adelantee/project/priceactionai-7d4d921509d8
 - Working Agreement: https://linear.app/adelantee/document/priceactionai-working-agreement-873f91c036cb
+
+## Regression
+
+Run:
+
+```bash
+pytest -q
+```
+
+The locked suite includes a healthy fixed NZDUSD snapshot plus the historical NZDUSD broker-history gap case.
 
 ## Development flow
 
