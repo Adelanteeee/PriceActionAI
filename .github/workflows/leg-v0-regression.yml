@@ -19,12 +19,24 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pip pytest pandas plotly
       - name: Compile locked Swing and Leg baseline
-        run: python -m py_compile src/price_action_ai_swing_v1.py src/price_action_ai_leg_v0.py research/leg_v0_visual_validation.py
+        run: python -m py_compile src/price_action_ai_swing_v1.py src/price_action_ai_leg_v0.py research/leg_v0_visual_validation.py research/leg_v0_gold_validation.py
       - name: Run Swing lock and Leg regression
         run: pytest -q tests/test_swing_v1_lock.py tests/test_leg_v0_baseline.py tests/test_leg_v0_real_snapshot.py
-      - name: Generate real-data visual validation artifact
+      - name: Generate NZDUSD regression artifact
         run: python research/leg_v0_visual_validation.py
-      - name: Upload Leg v0 visual validation
+      - name: Fetch current public Gold M30 history
+        run: curl -L --fail --retry 3 -o /tmp/XAUUSD_M30.csv https://raw.githubusercontent.com/simom1/XAUUSD-history/main/Gold-Cash/XAUUSD/XAUUSD_M30.csv
+      - name: Run Gold primary validation
+        run: python research/leg_v0_gold_validation.py --source /tmp/XAUUSD_M30.csv --count 500 --output-dir artifacts
+      - name: Upload Gold primary validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: leg-v0-xauusd-m30-primary-validation
+          path: |
+            artifacts/PriceActionAI_Leg_v0_XAUUSD_M30_500.html
+            artifacts/PriceActionAI_Leg_v0_XAUUSD_M30_500.csv
+            artifacts/PriceActionAI_Leg_v0_XAUUSD_M30_500_summary.json
+      - name: Upload NZDUSD regression artifact
         uses: actions/upload-artifact@v4
         with:
           name: leg-v0-nzdusd-m30-visual-validation
