@@ -21,7 +21,7 @@ jobs:
       - name: Compile locked Swing and Leg baseline
         run: python -m py_compile src/price_action_ai_swing_v1.py src/price_action_ai_leg_v0.py research/leg_v0_visual_validation.py research/leg_v0_gold_validation.py
       - name: Run Swing lock and Leg regression
-        run: pytest -q tests/test_swing_v1_lock.py tests/test_leg_v0_baseline.py tests/test_leg_v0_real_snapshot.py
+        run: pytest -q tests/test_swing_v1_lock.py tests/test_leg_v0_baseline.py tests/test_leg_v0_real_snapshot.py tests/test_gold_leg_multitf_visual_validator.py
       - name: Generate NZDUSD regression artifact
         run: python research/leg_v0_visual_validation.py
       - name: Fetch current public Gold M30 history
