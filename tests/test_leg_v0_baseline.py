@@ -1,11 +1,13 @@
 from pathlib import Path
 import importlib.util
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "price_action_ai_leg_v0.py"
 
 spec = importlib.util.spec_from_file_location("leg_v0", SRC)
 leg_v0 = importlib.util.module_from_spec(spec)
+sys.modules["leg_v0"] = leg_v0
 spec.loader.exec_module(leg_v0)
 
 
