@@ -1,7 +1,10 @@
 from pathlib import Path
+import base64
+import gzip
 import importlib.util
 import math
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "price_action_ai_swing_v1.py"
@@ -11,6 +14,16 @@ spec = importlib.util.spec_from_file_location("swing_v1", SRC)
 swing = importlib.util.module_from_spec(spec)
 sys.modules["swing_v1"] = swing
 spec.loader.exec_module(swing)
+
+
+def _decoded_fixture(stem):
+    encoded = (DATA / f"{stem}.csv.gz.b64").read_text(encoding="utf-8").strip()
+    raw = gzip.decompress(base64.b64decode(encoded))
+    outdir = Path(tempfile.gettempdir()) / "priceactionai_swing_v1_fixtures"
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"{stem}.csv"
+    path.write_bytes(raw)
+    return path
 
 
 def _pipeline_df(full, timeframe="M30"):
@@ -46,8 +59,8 @@ def _pipeline_df(full, timeframe="M30"):
     }
 
 
-def _pipeline(csv_name, timeframe="M30"):
-    return _pipeline_df(swing.load_snapshot_file(DATA / csv_name), timeframe)
+def _pipeline(stem, timeframe="M30"):
+    return _pipeline_df(swing.load_snapshot_file(_decoded_fixture(stem)), timeframe)
 
 
 def test_locked_contract_constants():
@@ -68,7 +81,7 @@ def test_reference_is_rms_target_snapped_to_observed_leg():
 
 
 def test_fixed_snapshot_loader_and_fx_diagnostics():
-    full = swing.load_snapshot_file(DATA / "NZDUSD_o_M30_500_20260827_0000.csv")
+    full = swing.load_snapshot_file(_decoded_fixture("NZDUSD_o_M30_500_20260827_0000"))
     df = full.tail(200).reset_index(drop=True)
     assert len(df) == 200
     spec = swing.symbol_display_spec("NZDUSD_o", None)
@@ -77,7 +90,7 @@ def test_fixed_snapshot_loader_and_fx_diagnostics():
 
 
 def test_broken_broker_history_is_hard_segment_boundary():
-    r = _pipeline("NZDUSD_o_M30_200_broken_gap_20260826_1930.csv")
+    r = _pipeline("NZDUSD_o_M30_200_broken_gap_20260826_1930")
     assert len(r["gap"]["segments"]) == 2
     assert len(r["gap"]["unexpected_gaps"]) == 1
     assert len(r["df"]) == 40
@@ -112,7 +125,7 @@ EXPECTED_500 = [
 
 
 def test_healthy_200_snapshot_regression_signature():
-    full = swing.load_snapshot_file(DATA / "NZDUSD_o_M30_500_20260827_0000.csv")
+    full = swing.load_snapshot_file(_decoded_fixture("NZDUSD_o_M30_500_20260827_0000"))
     r = _pipeline_df(full.tail(200).reset_index(drop=True))
     assert len(r["gap"]["segments"]) == 1
     assert len(r["gap"]["unexpected_gaps"]) == 0
@@ -126,7 +139,7 @@ def test_healthy_200_snapshot_regression_signature():
 
 
 def test_healthy_500_snapshot_regression_signature():
-    r = _pipeline("NZDUSD_o_M30_500_20260827_0000.csv")
+    r = _pipeline("NZDUSD_o_M30_500_20260827_0000")
     assert len(r["gap"]["segments"]) == 1
     assert len(r["gap"]["unexpected_gaps"]) == 0
     assert len(r["raw"]) == 95
