@@ -36,4 +36,5 @@ jobs:
         run: |
           pytest -q \
             tests/test_ade12_leg_metrics_hardening.py \
-            tests/test_ade12_data_integrity_cr.py
+            tests/test_ade12_data_integrity_cr.py \
+            tests/test_ade12_authoritative_gap_path.py
