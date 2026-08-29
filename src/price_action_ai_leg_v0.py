@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
-
 UPSTREAM_SWING_INVARIANT_ERROR = "UPSTREAM_SWING_INVARIANT_ERROR"
 
 
@@ -16,7 +15,13 @@ class ConfirmedLeg:
     net_thrust: float
     gross_close_path: float | None = None
     net_close_displacement: float | None = None
+    signed_close_displacement: float | None = None
+    direction_agreement: bool | None = None
     directional_efficiency: float | None = None
+    close_confirmation_ratio: float | None = None
+    temporal_profile_tag: str | None = None
+    gap_path_contribution: float | None = None
+    gap_path_share: float | None = None
 
 
 @dataclass(frozen=True)
@@ -41,37 +46,73 @@ def _direction_for_pair(left_kind: str, right_kind: str) -> str:
     raise ValueError(f"Unsupported Major Swing pair: {left_kind}->{right_kind}")
 
 
+def _temporal_profile(active_bar_count: int) -> str:
+    if active_bar_count <= 3:
+        return "UNDER_SAMPLED"
+    if active_bar_count <= 15:
+        return "NORMAL_TEMPORAL_PROFILE"
+    return "HIGHER_TF_CANDIDATE"
+
+
 def _close_path_metrics(
     closes: Sequence[float] | None,
     start_index: int,
     end_index: int,
-) -> tuple[float | None, float | None, float | None]:
+    direction: str,
+    scheduled_gap_after_indices: set[int],
+):
     if closes is None:
-        return None, None, None
-
+        return None, None, None, None, None, None, None
     if start_index < 0 or end_index < start_index or end_index >= len(closes):
         raise IndexError(
-            f"Close series does not cover Leg indexes {start_index}->{end_index}; "
-            f"len(closes)={len(closes)}"
+            f"Close series does not cover Leg indexes {start_index}->{end_index}; len(closes)={len(closes)}"
         )
 
     segment = [float(closes[i]) for i in range(start_index, end_index + 1)]
-    gross_close_path = sum(abs(segment[i] - segment[i - 1]) for i in range(1, len(segment)))
-    net_close_displacement = abs(segment[-1] - segment[0])
+    steps = [abs(segment[i] - segment[i - 1]) for i in range(1, len(segment))]
+    gross_close_path = sum(steps)
+    raw_close_change = segment[-1] - segment[0]
+    net_close_displacement = abs(raw_close_change)
+    direction_sign = 1.0 if direction == "BULLISH" else -1.0
+    signed_close_displacement = direction_sign * raw_close_change
+    direction_agreement = signed_close_displacement > 0.0
     directional_efficiency = (
-        net_close_displacement / gross_close_path if gross_close_path > 0 else None
+        min(1.0, max(0.0, signed_close_displacement) / gross_close_path)
+        if gross_close_path > 0
+        else None
     )
-    return gross_close_path, net_close_displacement, directional_efficiency
+
+    gap_path_contribution = 0.0
+    for current_index in range(start_index + 1, end_index + 1):
+        if current_index in scheduled_gap_after_indices:
+            gap_path_contribution += abs(
+                float(closes[current_index]) - float(closes[current_index - 1])
+            )
+    gap_path_share = (
+        gap_path_contribution / gross_close_path if gross_close_path > 0 else None
+    )
+
+    return (
+        gross_close_path,
+        net_close_displacement,
+        signed_close_displacement,
+        direction_agreement,
+        directional_efficiency,
+        gap_path_contribution,
+        gap_path_share,
+    )
 
 
 def build_confirmed_legs(
     major_swings: Iterable[dict[str, Any]],
     *,
     closes: Sequence[float] | None = None,
+    scheduled_gap_after_indices: Iterable[int] | None = None,
 ) -> LegBuildResult:
     swings = list(major_swings)
     legs: list[ConfirmedLeg] = []
     errors: list[LegBuildError] = []
+    gap_indices = {int(i) for i in (scheduled_gap_after_indices or [])}
 
     for pair_index, (left, right) in enumerate(zip(swings[:-1], swings[1:])):
         left_kind = str(left["kind"]).upper()
@@ -93,10 +134,27 @@ def build_confirmed_legs(
         end_index = int(right["index"])
         active_bar_count = end_index - start_index
         net_thrust = abs(float(right["price"]) - float(left["price"]))
-        gross_close_path, net_close_displacement, directional_efficiency = _close_path_metrics(
+
+        (
+            gross_close_path,
+            net_close_displacement,
+            signed_close_displacement,
+            direction_agreement,
+            directional_efficiency,
+            gap_path_contribution,
+            gap_path_share,
+        ) = _close_path_metrics(
             closes,
             start_index,
             end_index,
+            direction,
+            gap_indices,
+        )
+
+        close_confirmation_ratio = (
+            max(0.0, signed_close_displacement) / net_thrust
+            if signed_close_displacement is not None and net_thrust > 0
+            else None
         )
 
         legs.append(
@@ -108,7 +166,13 @@ def build_confirmed_legs(
                 net_thrust=net_thrust,
                 gross_close_path=gross_close_path,
                 net_close_displacement=net_close_displacement,
+                signed_close_displacement=signed_close_displacement,
+                direction_agreement=direction_agreement,
                 directional_efficiency=directional_efficiency,
+                close_confirmation_ratio=close_confirmation_ratio,
+                temporal_profile_tag=_temporal_profile(active_bar_count),
+                gap_path_contribution=gap_path_contribution,
+                gap_path_share=gap_path_share,
             )
         )
 
