@@ -29,6 +29,12 @@ class ConfirmedLeg:
     gross_body_magnitude: float | None = None
     gross_candle_range: float | None = None
     body_strength_ratio: float | None = None
+    gross_upper_shadow: float | None = None
+    gross_lower_shadow: float | None = None
+    gross_forward_shadow: float | None = None
+    gross_backward_shadow: float | None = None
+    gross_shadow_magnitude: float | None = None
+    shadow_position_imbalance: float | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +169,57 @@ def _body_strength_metrics(
     return gross_body_magnitude, gross_candle_range, body_strength_ratio
 
 
+def _shadow_position_metrics(
+    opens: Sequence[float] | None,
+    highs: Sequence[float] | None,
+    lows: Sequence[float] | None,
+    closes: Sequence[float] | None,
+    start_index: int,
+    end_index: int,
+    direction: str,
+):
+    if opens is None or highs is None or lows is None or closes is None:
+        return (None,) * 6
+    if not (len(opens) == len(highs) == len(lows) == len(closes)):
+        raise ValueError("OHLC series lengths must match")
+    if start_index < 0 or end_index < start_index or end_index >= len(closes):
+        raise IndexError(
+            f"OHLC series does not cover Leg indexes {start_index}->{end_index}; len={len(closes)}"
+        )
+
+    gross_upper_shadow = 0.0
+    gross_lower_shadow = 0.0
+    for i in range(start_index + 1, end_index + 1):
+        open_i = float(opens[i])
+        high_i = float(highs[i])
+        low_i = float(lows[i])
+        close_i = float(closes[i])
+        gross_upper_shadow += high_i - max(open_i, close_i)
+        gross_lower_shadow += min(open_i, close_i) - low_i
+
+    if direction == "BULLISH":
+        gross_forward_shadow = gross_upper_shadow
+        gross_backward_shadow = gross_lower_shadow
+    else:
+        gross_forward_shadow = gross_lower_shadow
+        gross_backward_shadow = gross_upper_shadow
+
+    gross_shadow_magnitude = gross_forward_shadow + gross_backward_shadow
+    shadow_position_imbalance = (
+        (gross_backward_shadow - gross_forward_shadow) / gross_shadow_magnitude
+        if gross_shadow_magnitude > 0.0
+        else None
+    )
+    return (
+        gross_upper_shadow,
+        gross_lower_shadow,
+        gross_forward_shadow,
+        gross_backward_shadow,
+        gross_shadow_magnitude,
+        shadow_position_imbalance,
+    )
+
+
 def build_confirmed_legs(
     major_swings: Iterable[dict[str, Any]],
     *,
@@ -237,6 +294,23 @@ def build_confirmed_legs(
             end_index,
         )
 
+        (
+            gross_upper_shadow,
+            gross_lower_shadow,
+            gross_forward_shadow,
+            gross_backward_shadow,
+            gross_shadow_magnitude,
+            shadow_position_imbalance,
+        ) = _shadow_position_metrics(
+            opens,
+            highs,
+            lows,
+            closes,
+            start_index,
+            end_index,
+            direction,
+        )
+
         legs.append(
             ConfirmedLeg(
                 start=left,
@@ -260,6 +334,12 @@ def build_confirmed_legs(
                 gross_body_magnitude=gross_body_magnitude,
                 gross_candle_range=gross_candle_range,
                 body_strength_ratio=body_strength_ratio,
+                gross_upper_shadow=gross_upper_shadow,
+                gross_lower_shadow=gross_lower_shadow,
+                gross_forward_shadow=gross_forward_shadow,
+                gross_backward_shadow=gross_backward_shadow,
+                gross_shadow_magnitude=gross_shadow_magnitude,
+                shadow_position_imbalance=shadow_position_imbalance,
             )
         )
 
