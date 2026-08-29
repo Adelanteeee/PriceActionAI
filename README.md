@@ -15,11 +15,26 @@ No downstream module may silently change a locked upstream definition. Any chang
 ## Current project state
 
 - **Sprint 1 — Swing Engine: Locked**
-- Production baseline: `src/price_action_ai_swing_v1.py`
-- Market logic: **v1.7.5 Clean Baseline**
-- Data-integrity/audit hardening: **ADE-9 included**
+- **Sprint 2 — Leg Engine: Active**
+- **ADE-12 Leg Metrics baseline: Locked on `sprint2-leg-baseline`**
+- Swing market logic: **v1.7.5 Clean Baseline**
+- Swing Data Integrity: **ADE-9 + bounded ADE-12 XAU M5 session-gap CR**
 - v1.7.6 Depth × Time: **Experiment Failed — Not Adopted** (research archived)
-- Next: **Sprint 2 — Leg Engine**
+
+## Locked Leg Metrics baseline
+
+The current Sprint 2 baseline keeps the following dimensions separate:
+
+- **Net Thrust** = structural extreme-to-extreme size
+- **Gross Close Path** = close-to-close path length
+- **Signed Close Displacement** = structural-direction-aware close displacement
+- **Direction Agreement** = signed displacement > 0
+- **Directional Efficiency** = clipped signed displacement / gross close path
+- **Close Confirmation Ratio** = clipped signed displacement / net thrust
+- **Temporal Profile Tag** = diagnostic only
+- **Gap Path Contribution / Share** = scheduled-gap diagnostics only
+
+No Body/Wick/Overlap/Volume, no Quality Score, and no Accept/Reject gate are part of this locked baseline.
 
 ## Swing v1 lock contract
 
@@ -47,7 +62,7 @@ Run:
 pytest -q
 ```
 
-The locked suite includes a healthy fixed NZDUSD snapshot plus the historical NZDUSD broker-history gap case.
+The locked suite includes Swing lock regression, Leg baseline regression, ADE-12 hardening regression, authoritative Data Integrity path regression, and historical NZDUSD gap fixtures.
 
 ## Development flow
 
