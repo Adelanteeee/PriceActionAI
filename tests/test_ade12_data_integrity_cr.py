@@ -23,6 +23,27 @@ def test_xau_m5_daily_closure_is_scheduled_not_unexpected():
     assert [g["reason"] for g in result["scheduled"]] == ["SCHEDULED_XAU_DAILY_CLOSURE"]
 
 
+def test_xau_h1_memorial_day_2026_closure_is_scheduled_not_unexpected():
+    df = df_times(["2026-05-25 21:00", "2026-05-26 01:00"])
+    result = data_cr.classify_time_gaps(df, "H1", symbol="XAUUSD_o")
+    assert len(result["unexpected"]) == 0
+    assert [g["reason"] for g in result["scheduled"]] == ["SCHEDULED_XAU_MEMORIAL_DAY_2026"]
+
+
+def test_same_h1_holiday_signature_on_neighbor_date_stays_unexpected():
+    df = df_times(["2026-05-26 21:00", "2026-05-27 01:00"])
+    result = data_cr.classify_time_gaps(df, "H1", symbol="XAUUSD_o")
+    assert len(result["unexpected"]) == 1
+    assert result["unexpected"][0]["reason"] == "UNEXPECTED_DATA_GAP"
+
+
+def test_same_h1_holiday_signature_is_not_special_for_non_gold():
+    df = df_times(["2026-05-25 21:00", "2026-05-26 01:00"])
+    result = data_cr.classify_time_gaps(df, "H1", symbol="EURUSD")
+    assert len(result["unexpected"]) == 1
+    assert result["unexpected"][0]["reason"] == "UNEXPECTED_DATA_GAP"
+
+
 def test_same_65_minute_gap_is_not_special_for_non_gold():
     df = df_times(["2026-08-27 23:55", "2026-08-28 01:00"])
     result = data_cr.classify_time_gaps(df, "M5", symbol="EURUSD")
