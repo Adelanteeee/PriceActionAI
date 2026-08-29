@@ -21,7 +21,6 @@ def _load(name: str, path: Path):
 
 
 swing = _load("pai_swing_v1_ade12", ROOT / "src" / "price_action_ai_swing_v1.py")
-data_cr = _load("pai_data_integrity_cr_ade12", ROOT / "src" / "price_action_ai_data_integrity_cr.py")
 leg_engine = _load("pai_leg_v0_ade12", ROOT / "src" / "price_action_ai_leg_v0.py")
 
 TIMEFRAMES = ("M5", "M15", "M30", "H1")
@@ -56,7 +55,7 @@ def fetch_once(mt5, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
 
 
 def run_swing(full_df: pd.DataFrame, symbol: str, timeframe: str):
-    gap = data_cr.segment_on_unexpected_gaps(full_df.copy(), timeframe, symbol=symbol)
+    gap = swing.segment_on_unexpected_gaps(full_df.copy(), timeframe, symbol=symbol)
     df = gap["active_segment"].copy().reset_index(drop=True)
     raw = swing.detect_pivot_candidates(df)
     structural, internal = swing.tag_internal_candidates(raw)
