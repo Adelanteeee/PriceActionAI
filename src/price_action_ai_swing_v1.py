@@ -3,7 +3,7 @@ from __future__ import annotations
 """Authoritative Swing v1 entry point.
 
 The locked Swing implementation is preserved byte-for-byte in
-``price_action_ai_swing_v1_locked.py``.  This wrapper re-exports that API and
+``price_action_ai_swing_v1_locked.py``. This wrapper re-exports that API and
 routes Data Integrity gap classification through the bounded ADE-12 Change
 Request module so every caller sees the same scheduled/unexpected gap rules.
 
@@ -44,6 +44,15 @@ segment_on_unexpected_gaps = _data_integrity.segment_on_unexpected_gaps
 # Data Integrity implementation.
 _locked.classify_time_gaps = classify_time_gaps
 _locked.segment_on_unexpected_gaps = segment_on_unexpected_gaps
+
+
+def _load_core():
+    """Preserve the public self-contained-core contract of Swing v1."""
+    return sys.modules[__name__]
+
+
+# Keep internal callers aligned with the public contract too.
+_locked._load_core = _load_core
 
 
 def main():
