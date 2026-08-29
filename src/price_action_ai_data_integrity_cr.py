@@ -67,6 +67,30 @@ def _is_scheduled_xau_daily_closure(
     return (curr - prev) == pd.Timedelta(minutes=65)
 
 
+_XAU_SCHEDULED_HOLIDAY_CLOSURES = {
+    # LiteFinance XAUUSD_o broker-time observation, independently corroborated
+    # as a Memorial Day 2026 early-close session for gold.
+    ("H1", "2026-05-25 21:00", "2026-05-26 01:00"): "SCHEDULED_XAU_MEMORIAL_DAY_2026",
+}
+
+
+def _scheduled_xau_holiday_reason(
+    prev: pd.Timestamp,
+    curr: pd.Timestamp,
+    timeframe: str,
+    symbol: str | None,
+) -> str | None:
+    """Return a reason only for exact, evidence-backed XAU holiday closures."""
+    if not _is_xau_symbol(symbol):
+        return None
+    key = (
+        normalize_timeframe(timeframe),
+        prev.strftime("%Y-%m-%d %H:%M"),
+        curr.strftime("%Y-%m-%d %H:%M"),
+    )
+    return _XAU_SCHEDULED_HOLIDAY_CLOSURES.get(key)
+
+
 def classify_time_gaps(
     df: pd.DataFrame,
     timeframe: str,
@@ -113,6 +137,9 @@ def classify_time_gaps(
             scheduled.append(gap)
         elif _is_scheduled_xau_daily_closure(prev, curr, timeframe, symbol):
             gap["reason"] = "SCHEDULED_XAU_DAILY_CLOSURE"
+            scheduled.append(gap)
+        elif (holiday_reason := _scheduled_xau_holiday_reason(prev, curr, timeframe, symbol)) is not None:
+            gap["reason"] = holiday_reason
             scheduled.append(gap)
         elif sig_counts[gap["signature"]] >= 2:
             gap["reason"] = "RECURRING_SESSION_CLOSURE"
