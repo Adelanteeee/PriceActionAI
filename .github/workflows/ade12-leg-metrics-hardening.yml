@@ -1,0 +1,38 @@
+name: ADE-12 Leg Metrics Hardening
+
+on:
+  push:
+    branches:
+      - ade-12-leg-metrics-hardening
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pytest pandas plotly
+      - name: Compile locked Swing, Data Integrity CR and Leg
+        run: |
+          python -m py_compile \
+            src/price_action_ai_swing_v1.py \
+            src/price_action_ai_data_integrity_cr.py \
+            src/price_action_ai_leg_v0.py
+      - name: Run locked Swing + Leg baseline regressions
+        run: |
+          pytest -q \
+            tests/test_swing_v1_lock.py \
+            tests/test_leg_v0_baseline.py \
+            tests/test_leg_v0_real_snapshot.py \
+            tests/test_gold_leg_multitf_visual_validator.py
+      - name: Run ADE-12 hardening regressions
+        run: |
+          pytest -q \
+            tests/test_ade12_leg_metrics_hardening.py \
+            tests/test_ade12_data_integrity_cr.py
