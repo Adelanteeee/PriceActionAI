@@ -26,6 +26,9 @@ class ConfirmedLeg:
     temporal_profile_tag: str | None = None
     gap_path_contribution: float | None = None
     gap_path_share: float | None = None
+    gross_body_magnitude: float | None = None
+    gross_candle_range: float | None = None
+    body_strength_ratio: float | None = None
 
 
 @dataclass(frozen=True)
@@ -127,9 +130,45 @@ def _close_path_metrics(
     )
 
 
+def _body_strength_metrics(
+    opens: Sequence[float] | None,
+    highs: Sequence[float] | None,
+    lows: Sequence[float] | None,
+    closes: Sequence[float] | None,
+    start_index: int,
+    end_index: int,
+):
+    if opens is None or highs is None or lows is None or closes is None:
+        return None, None, None
+    if not (len(opens) == len(highs) == len(lows) == len(closes)):
+        raise ValueError("OHLC series lengths must match")
+    if start_index < 0 or end_index < start_index or end_index >= len(closes):
+        raise IndexError(
+            f"OHLC series does not cover Leg indexes {start_index}->{end_index}; len={len(closes)}"
+        )
+
+    owned_indices = range(start_index + 1, end_index + 1)
+    gross_body_magnitude = sum(
+        abs(float(closes[i]) - float(opens[i])) for i in owned_indices
+    )
+    gross_candle_range = sum(
+        float(highs[i]) - float(lows[i])
+        for i in range(start_index + 1, end_index + 1)
+    )
+    body_strength_ratio = (
+        gross_body_magnitude / gross_candle_range
+        if gross_candle_range > 0.0
+        else None
+    )
+    return gross_body_magnitude, gross_candle_range, body_strength_ratio
+
+
 def build_confirmed_legs(
     major_swings: Iterable[dict[str, Any]],
     *,
+    opens: Sequence[float] | None = None,
+    highs: Sequence[float] | None = None,
+    lows: Sequence[float] | None = None,
     closes: Sequence[float] | None = None,
     scheduled_gap_after_indices: Iterable[int] | None = None,
 ) -> LegBuildResult:
@@ -185,6 +224,19 @@ def build_confirmed_legs(
             else None
         )
 
+        (
+            gross_body_magnitude,
+            gross_candle_range,
+            body_strength_ratio,
+        ) = _body_strength_metrics(
+            opens,
+            highs,
+            lows,
+            closes,
+            start_index,
+            end_index,
+        )
+
         legs.append(
             ConfirmedLeg(
                 start=left,
@@ -205,6 +257,9 @@ def build_confirmed_legs(
                 temporal_profile_tag=_temporal_profile(active_bar_count),
                 gap_path_contribution=gap_path_contribution,
                 gap_path_share=gap_path_share,
+                gross_body_magnitude=gross_body_magnitude,
+                gross_candle_range=gross_candle_range,
+                body_strength_ratio=body_strength_ratio,
             )
         )
 
