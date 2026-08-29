@@ -18,6 +18,10 @@ class ConfirmedLeg:
     signed_close_displacement: float | None = None
     direction_agreement: bool | None = None
     directional_efficiency: float | None = None
+    aligned_close_steps: int | None = None
+    opposing_close_steps: int | None = None
+    flat_close_steps: int | None = None
+    directional_continuity_ratio: float | None = None
     close_confirmation_ratio: float | None = None
     temporal_profile_tag: str | None = None
     gap_path_contribution: float | None = None
@@ -62,14 +66,15 @@ def _close_path_metrics(
     scheduled_gap_after_indices: set[int],
 ):
     if closes is None:
-        return None, None, None, None, None, None, None
+        return (None,) * 11
     if start_index < 0 or end_index < start_index or end_index >= len(closes):
         raise IndexError(
             f"Close series does not cover Leg indexes {start_index}->{end_index}; len(closes)={len(closes)}"
         )
 
     segment = [float(closes[i]) for i in range(start_index, end_index + 1)]
-    steps = [abs(segment[i] - segment[i - 1]) for i in range(1, len(segment))]
+    close_steps = [segment[i] - segment[i - 1] for i in range(1, len(segment))]
+    steps = [abs(step) for step in close_steps]
     gross_close_path = sum(steps)
     raw_close_change = segment[-1] - segment[0]
     net_close_displacement = abs(raw_close_change)
@@ -80,6 +85,21 @@ def _close_path_metrics(
         min(1.0, max(0.0, signed_close_displacement) / gross_close_path)
         if gross_close_path > 0
         else None
+    )
+
+    directional_steps = [direction_sign * step for step in close_steps]
+    aligned_close_steps = sum(1 for step in directional_steps if step > 0.0)
+    opposing_close_steps = sum(1 for step in directional_steps if step < 0.0)
+    flat_close_steps = sum(1 for step in directional_steps if step == 0.0)
+    total_close_steps = aligned_close_steps + opposing_close_steps + flat_close_steps
+    expected_close_steps = end_index - start_index
+    if total_close_steps != expected_close_steps:
+        raise AssertionError(
+            "Directional Continuity invariant failed: "
+            f"{total_close_steps} classified close steps != {expected_close_steps} active bars"
+        )
+    directional_continuity_ratio = (
+        aligned_close_steps / total_close_steps if total_close_steps > 0 else None
     )
 
     gap_path_contribution = 0.0
@@ -100,6 +120,10 @@ def _close_path_metrics(
         directional_efficiency,
         gap_path_contribution,
         gap_path_share,
+        aligned_close_steps,
+        opposing_close_steps,
+        flat_close_steps,
+        directional_continuity_ratio,
     )
 
 
@@ -143,6 +167,10 @@ def build_confirmed_legs(
             directional_efficiency,
             gap_path_contribution,
             gap_path_share,
+            aligned_close_steps,
+            opposing_close_steps,
+            flat_close_steps,
+            directional_continuity_ratio,
         ) = _close_path_metrics(
             closes,
             start_index,
@@ -169,6 +197,10 @@ def build_confirmed_legs(
                 signed_close_displacement=signed_close_displacement,
                 direction_agreement=direction_agreement,
                 directional_efficiency=directional_efficiency,
+                aligned_close_steps=aligned_close_steps,
+                opposing_close_steps=opposing_close_steps,
+                flat_close_steps=flat_close_steps,
+                directional_continuity_ratio=directional_continuity_ratio,
                 close_confirmation_ratio=close_confirmation_ratio,
                 temporal_profile_tag=_temporal_profile(active_bar_count),
                 gap_path_contribution=gap_path_contribution,
