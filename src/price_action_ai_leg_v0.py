@@ -35,6 +35,9 @@ class ConfirmedLeg:
     gross_backward_shadow: float | None = None
     gross_shadow_magnitude: float | None = None
     shadow_position_imbalance: float | None = None
+    gross_overlap_magnitude: float | None = None
+    gross_overlap_capacity: float | None = None
+    overlap_ratio: float | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +223,51 @@ def _shadow_position_metrics(
     )
 
 
+def _overlap_metrics(
+    highs: Sequence[float] | None,
+    lows: Sequence[float] | None,
+    start_index: int,
+    end_index: int,
+):
+    if highs is None or lows is None:
+        return None, None, None
+    if len(highs) != len(lows):
+        raise ValueError("High/Low series lengths must match")
+    if start_index < 0 or end_index < start_index or end_index >= len(highs):
+        raise IndexError(
+            f"High/Low series does not cover Leg indexes {start_index}->{end_index}; len={len(highs)}"
+        )
+
+    gross_overlap_magnitude = 0.0
+    gross_overlap_capacity = 0.0
+
+    # Only pairs where both candles are owned by (start_index, end_index].
+    for current_index in range(start_index + 2, end_index + 1):
+        previous_index = current_index - 1
+        previous_high = float(highs[previous_index])
+        previous_low = float(lows[previous_index])
+        current_high = float(highs[current_index])
+        current_low = float(lows[current_index])
+
+        previous_range = previous_high - previous_low
+        current_range = current_high - current_low
+        pair_overlap_capacity = min(previous_range, current_range)
+        overlap_magnitude = max(
+            0.0,
+            min(previous_high, current_high) - max(previous_low, current_low),
+        )
+
+        gross_overlap_magnitude += overlap_magnitude
+        gross_overlap_capacity += pair_overlap_capacity
+
+    overlap_ratio = (
+        gross_overlap_magnitude / gross_overlap_capacity
+        if gross_overlap_capacity > 0.0
+        else None
+    )
+    return gross_overlap_magnitude, gross_overlap_capacity, overlap_ratio
+
+
 def build_confirmed_legs(
     major_swings: Iterable[dict[str, Any]],
     *,
@@ -311,6 +359,17 @@ def build_confirmed_legs(
             direction,
         )
 
+        (
+            gross_overlap_magnitude,
+            gross_overlap_capacity,
+            overlap_ratio,
+        ) = _overlap_metrics(
+            highs,
+            lows,
+            start_index,
+            end_index,
+        )
+
         legs.append(
             ConfirmedLeg(
                 start=left,
@@ -340,6 +399,9 @@ def build_confirmed_legs(
                 gross_backward_shadow=gross_backward_shadow,
                 gross_shadow_magnitude=gross_shadow_magnitude,
                 shadow_position_imbalance=shadow_position_imbalance,
+                gross_overlap_magnitude=gross_overlap_magnitude,
+                gross_overlap_capacity=gross_overlap_capacity,
+                overlap_ratio=overlap_ratio,
             )
         )
 
