@@ -9,10 +9,11 @@ import json
 import math
 import re
 import zipfile
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -77,7 +78,6 @@ STRING_COLUMNS = frozenset(
 FLOAT_COLUMNS = REQUIRED_LEG_COLUMNS - INTEGER_COLUMNS - STRING_COLUMNS
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
-_COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
 _FINITE_DECIMAL_RE = re.compile(
     r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z"
 )
@@ -136,13 +136,13 @@ def _require_nonblank_string(mapping: Mapping[str, Any], key: str, location: str
 
 
 def _validate_member_name(tf: str, role: str, name: str) -> None:
-    path = PurePosixPath(name)
+    raw_parts = name.split("/")
     unsafe = (
         not name
         or "\\" in name
-        or path.is_absolute()
+        or name.startswith("/")
         or name.endswith("/")
-        or any(part in {"", ".", ".."} for part in path.parts)
+        or any(part in {"", ".", ".."} for part in raw_parts)
     )
     if unsafe:
         raise ValueError(f"{tf}: unsafe manifest {role} ZIP member name {name!r}")
@@ -197,9 +197,7 @@ def _validate_manifest(manifest: dict[str, Any]) -> dict[str, dict[str, str]]:
             f"manifest status must be {FINAL_LOCK_STATUS!r}, got {status!r}"
         )
 
-    current_commit = _require_nonblank_string(manifest, "current_commit", "manifest")
-    if _COMMIT_RE.fullmatch(current_commit) is None:
-        raise ValueError("manifest field 'current_commit' must be a 40-character lowercase SHA")
+    _require_nonblank_string(manifest, "current_commit", "manifest")
     _require_nonblank_string(manifest, "broker_company", "manifest")
     _require_nonblank_string(manifest, "broker_server", "manifest")
 
@@ -262,10 +260,16 @@ def _decode_csv(tf: str, csv_name: str, data: bytes) -> tuple[list[str], list[di
         raise ValueError(f"{tf}: Leg CSV {csv_name!r} must be UTF-8: {exc}") from exc
     try:
         reader = csv.DictReader(io.StringIO(text, newline=""))
+        header = list(reader.fieldnames or [])
+        duplicates = sorted(
+            name for name, count in Counter(header).items() if count > 1
+        )
+        if duplicates:
+            raise ValueError(f"{tf}: duplicate Leg CSV columns: {duplicates}")
         rows = list(reader)
     except csv.Error as exc:
         raise ValueError(f"{tf}: malformed Leg CSV {csv_name!r}: {exc}") from exc
-    return list(reader.fieldnames or []), rows
+    return header, rows
 
 
 def _numeric_error(

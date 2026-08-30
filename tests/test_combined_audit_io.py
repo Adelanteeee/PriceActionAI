@@ -85,7 +85,14 @@ STRING_COLUMNS = {
 }
 
 
-def _csv_bytes(tf, *, drop_columns=(), overrides=(), extra_columns=()):
+def _csv_bytes(
+    tf,
+    *,
+    drop_columns=(),
+    overrides=(),
+    extra_columns=(),
+    duplicate_columns=(),
+):
     fieldnames = [name for name in REQUIRED_COLUMNS if name not in drop_columns]
     fieldnames.extend(extra_columns)
     rows = []
@@ -113,7 +120,15 @@ def _csv_bytes(tf, *, drop_columns=(), overrides=(), extra_columns=()):
     writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
-    return stream.getvalue().encode("utf-8")
+    csv_rows = list(csv.reader(io.StringIO(stream.getvalue(), newline="")))
+    for column in duplicate_columns:
+        csv_rows[0].append(column)
+        for data_row in csv_rows[1:]:
+            data_row.append("999.5")
+
+    duplicated = io.StringIO(newline="")
+    csv.writer(duplicated, lineterminator="\n").writerows(csv_rows)
+    return duplicated.getvalue().encode("utf-8")
 
 
 def make_synthetic_activity_zip(
@@ -127,11 +142,13 @@ def make_synthetic_activity_zip(
     missing_members=(),
     extra_members=None,
     duplicate_member=None,
+    duplicate_columns_by_tf=None,
 ):
     drop_columns_by_tf = drop_columns_by_tf or {}
     csv_names = csv_names or {tf: f"{tf}.csv" for tf in TIMEFRAMES}
     missing_members = set(missing_members)
     extra_members = extra_members or {}
+    duplicate_columns_by_tf = duplicate_columns_by_tf or {}
 
     snapshots = {tf: f"snapshot,{tf}\n1,{tf}\n".encode() for tf in TIMEFRAMES}
     manifest = {
@@ -166,6 +183,7 @@ def make_synthetic_activity_zip(
             drop_columns=drop_columns_by_tf.get(tf, ()),
             overrides=overrides,
             extra_columns=("unexpected_metric",),
+            duplicate_columns=duplicate_columns_by_tf.get(tf, ()),
         )
         members[f"snapshots/{tf}_snapshot.csv"] = snapshots[tf]
     members.update(extra_members)
@@ -229,6 +247,24 @@ def test_loader_checks_all_schemas_before_parsing_any_numeric_rows(tmp_path):
 
     with pytest.raises(ValueError, match="M15: missing required Leg CSV columns"):
         load_locked_activity_package(package)
+
+
+def test_loader_rejects_duplicate_csv_headers_before_parsing_rows(tmp_path):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        drop_columns_by_tf={"M30": {"gross_backward_shadow"}},
+        duplicate_columns_by_tf={
+            "M30": ("mean_tick_activity", "active_bar_count")
+        },
+    )
+
+    with pytest.raises(ValueError) as exc:
+        load_locked_activity_package(package)
+
+    assert str(exc.value) == (
+        "M30: duplicate Leg CSV columns: "
+        "['active_bar_count', 'mean_tick_activity']"
+    )
 
 
 @pytest.mark.parametrize(
@@ -340,6 +376,42 @@ def test_loader_rejects_snapshot_hash_mismatch(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "current_commit",
+    [
+        "B43ED7A6D1D8538D8860934ABBB24B0C9561A317",
+        "b43ed7a",
+        "release-candidate-7",
+    ],
+)
+def test_loader_accepts_any_nonblank_current_commit_identifier(
+    tmp_path, current_commit
+):
+    def replace_current_commit(manifest):
+        manifest["current_commit"] = current_commit
+
+    package = make_synthetic_activity_zip(
+        tmp_path, mutate_manifest=replace_current_commit
+    )
+
+    bundle = load_locked_activity_package(package)
+
+    assert bundle.manifest["current_commit"] == current_commit
+
+
+@pytest.mark.parametrize("current_commit", ["", " \t ", None, 123])
+def test_loader_rejects_blank_or_non_string_current_commit(tmp_path, current_commit):
+    def replace_current_commit(manifest):
+        manifest["current_commit"] = current_commit
+
+    package = make_synthetic_activity_zip(
+        tmp_path, mutate_manifest=replace_current_commit
+    )
+
+    with pytest.raises(ValueError, match="current_commit.*nonblank string"):
+        load_locked_activity_package(package)
+
+
+@pytest.mark.parametrize(
     "missing_path",
     [
         ("status",),
@@ -406,13 +478,28 @@ def test_loader_rejects_duplicate_timeframe_metadata_value(tmp_path):
         load_locked_activity_package(package)
 
 
-def test_loader_rejects_unsafe_manifest_member_name(tmp_path):
+@pytest.mark.parametrize(
+    "unsafe_name",
+    [
+        "locked/./M5.csv",
+        "locked/../M5.csv",
+        "locked//M5.csv",
+        "/M5.csv",
+        "locked\\M5.csv",
+        "locked/",
+    ],
+)
+def test_loader_rejects_unsafe_raw_manifest_member_spelling(tmp_path, unsafe_name):
     csv_names = {tf: f"{tf}.csv" for tf in TIMEFRAMES}
-    csv_names["M5"] = "../M5.csv"
+    csv_names["M5"] = unsafe_name
     package = make_synthetic_activity_zip(tmp_path, csv_names=csv_names)
 
-    with pytest.raises(ValueError, match=r"M5.*unsafe.*\.\./M5.csv"):
+    with pytest.raises(ValueError) as exc:
         load_locked_activity_package(package)
+
+    assert str(exc.value) == (
+        f"M5: unsafe manifest csv ZIP member name {unsafe_name!r}"
+    )
 
 
 def test_loader_rejects_missing_manifest_referenced_member(tmp_path):
