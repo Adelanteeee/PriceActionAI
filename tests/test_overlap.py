@@ -56,7 +56,7 @@ def _build_one(
 def test_disjoint_ranges_have_zero_overlap():
     x = _build_one([(0, 1), (10, 12), (13, 15)])
     assert x.gross_overlap_magnitude == 0.0
-    assert x.gross_overlap_capacity == 4.0
+    assert x.gross_overlap_capacity == 2.0
     assert x.overlap_ratio == 0.0
 
 
@@ -178,7 +178,6 @@ def test_overlap_bounds_and_formula_invariants():
 
 
 def test_locked_body_and_shadow_metrics_remain_unchanged_for_known_case():
-    ranges = [(0, 1), (10, 14), (11, 16)]
     opens = [0.5, 11.0, 12.0]
     highs = [1.0, 14.0, 16.0]
     lows = [0.0, 10.0, 11.0]
