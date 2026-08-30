@@ -4,6 +4,7 @@ from research.combined_audit_contract import (
     DETERMINISTIC_FLOAT_ABS_TOL,
     DETERMINISTIC_FLOAT_REL_TOL,
     DETERMINISTIC_RELATIONS,
+    DETERMINISTIC_REGISTRY,
     FEATURE_ROLE_COLUMNS,
     FEATURE_SPECS,
     MAIN_FEATURES,
@@ -117,6 +118,41 @@ def test_shadow_formula_and_deterministic_relation_ids_are_locked():
         "SLOPE_NORMALIZATION",
         "TICK_ACTIVITY_IDENTITY",
     )
+
+
+def test_directional_formulas_preserve_locked_signed_clamping():
+    assert FEATURE_SPECS["directional_efficiency"].formula == (
+        "min(1.0, max(0.0, signed_close_displacement) / gross_close_path) "
+        "when gross_close_path > 0, else None"
+    )
+    assert FEATURE_SPECS["close_confirmation_ratio"].formula == (
+        "max(0.0, signed_close_displacement) / net_thrust "
+        "when signed_close_displacement is defined and net_thrust > 0, else None"
+    )
+    assert "abs(signed_close_displacement)" not in FEATURE_SPECS["directional_efficiency"].formula
+    assert "abs(signed_close_displacement)" not in FEATURE_SPECS["close_confirmation_ratio"].formula
+
+
+def test_gap_path_contribution_uses_scheduled_close_step_path():
+    assert FEATURE_SPECS["gap_path_contribution"].formula == (
+        "sum(abs(close_i - close_{i-1})) only for active close steps "
+        "whose current index is in scheduled_gap_after_indices"
+    )
+
+
+def test_none_branches_are_explicit_in_deterministic_registry():
+    expected = {
+        "CONTINUITY_RATIO": "active_bar_count == 0",
+        "BODY_STRENGTH_RATIO": "gross_candle_range == 0",
+        "GAP_PATH_SHARE": "gross_close_path == 0",
+        "SHADOW_POSITION_IMBALANCE": "gross_shadow_magnitude == 0",
+        "OVERLAP_RATIO": "gross_overlap_capacity == 0",
+        "SLOPE_NORMALIZATION": "mean_candle_range is None or mean_candle_range <= 0",
+    }
+    for relation_id, undefined_when in expected.items():
+        metadata = DETERMINISTIC_REGISTRY[relation_id]
+        assert metadata["undefined_when"] == undefined_when
+        assert metadata["undefined_result"] == "None (valid undefined value)"
 
 
 def test_feature_role_rows_are_csv_ready_and_do_not_alias_registry():

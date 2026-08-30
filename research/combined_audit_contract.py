@@ -152,7 +152,8 @@ FEATURE_SPECS: dict[str, FeatureSpec] = {
     ),
     "directional_efficiency": _main(
         "directional_efficiency",
-        "abs(signed_close_displacement) / gross_close_path",
+        "min(1.0, max(0.0, signed_close_displacement) / gross_close_path) "
+        "when gross_close_path > 0, else None",
         "nonnegative ratio; undefined when gross_close_path == 0",
         "DIRECTION_RELATIVE",
     ),
@@ -164,7 +165,8 @@ FEATURE_SPECS: dict[str, FeatureSpec] = {
     ),
     "close_confirmation_ratio": _main(
         "close_confirmation_ratio",
-        "abs(signed_close_displacement) / net_thrust",
+        "max(0.0, signed_close_displacement) / net_thrust "
+        "when signed_close_displacement is defined and net_thrust > 0, else None",
         "nonnegative ratio; undefined when net_thrust == 0",
         "DIRECTION_RELATIVE",
     ),
@@ -232,7 +234,8 @@ FEATURE_SPECS: dict[str, FeatureSpec] = {
     ),
     "gap_path_contribution": _component(
         "gap_path_contribution",
-        "sum of direction-aligned open-to-previous-close gaps",
+        "sum(abs(close_i - close_{i-1})) only for active close steps "
+        "whose current index is in scheduled_gap_after_indices",
         "nonnegative magnitude",
         "DIRECTION_RELATIVE",
         identity=True,
@@ -463,6 +466,20 @@ DETERMINISTIC_RELATION_CONDITIONS: dict[str, str] = {
     "TICK_ACTIVITY_IDENTITY": "active_bar_count > 0",
 }
 
+DETERMINISTIC_RELATION_UNDEFINED_WHEN: dict[str, str] = {
+    "CLOSE_DISPLACEMENT_ABS": "never (invalid direction_sign is an input error)",
+    "CONTINUITY_COUNT_SUM": "never",
+    "CONTINUITY_RATIO": "active_bar_count == 0",
+    "BODY_STRENGTH_RATIO": "gross_candle_range == 0",
+    "GAP_PATH_SHARE": "gross_close_path == 0",
+    "SHADOW_MAGNITUDE_SUM": "never",
+    "SHADOW_POSITION_IMBALANCE": "gross_shadow_magnitude == 0",
+    "OVERLAP_RATIO": "gross_overlap_capacity == 0",
+    "SLOPE_DIRECTION": "never (invalid direction_sign is an input error)",
+    "SLOPE_NORMALIZATION": "mean_candle_range is None or mean_candle_range <= 0",
+    "TICK_ACTIVITY_IDENTITY": "never",
+}
+
 # A single named registry is convenient for report builders and keeps the
 # relation IDs, formulas, and conditions synchronized in one place.
 DETERMINISTIC_REGISTRY: dict[str, dict[str, str]] = {
@@ -470,6 +487,13 @@ DETERMINISTIC_REGISTRY: dict[str, dict[str, str]] = {
         "relation": relation,
         "formula": DETERMINISTIC_RELATION_FORMULAS[relation],
         "condition": DETERMINISTIC_RELATION_CONDITIONS[relation],
+        "undefined_when": DETERMINISTIC_RELATION_UNDEFINED_WHEN[relation],
+        "undefined_result": (
+            "None (valid undefined value)"
+            if DETERMINISTIC_RELATION_UNDEFINED_WHEN[relation] != "never"
+            and not DETERMINISTIC_RELATION_UNDEFINED_WHEN[relation].startswith("never ")
+            else "not applicable"
+        ),
     }
     for relation in DETERMINISTIC_RELATIONS
 }
@@ -489,6 +513,7 @@ __all__ = [
     "DETERMINISTIC_RELATIONS",
     "DETERMINISTIC_RELATION_CONDITIONS",
     "DETERMINISTIC_RELATION_FORMULAS",
+    "DETERMINISTIC_RELATION_UNDEFINED_WHEN",
     "DETERMINISTIC_REGISTRY",
     "DIRECTIONS",
     "FEATURE_ROLE_COLUMNS",
