@@ -38,6 +38,9 @@ class ConfirmedLeg:
     gross_overlap_magnitude: float | None = None
     gross_overlap_capacity: float | None = None
     overlap_ratio: float | None = None
+    close_ols_slope: float | None = None
+    directional_close_ols_slope: float | None = None
+    normalized_directional_close_ols_slope: float | None = None
 
 
 @dataclass(frozen=True)
@@ -241,7 +244,6 @@ def _overlap_metrics(
     gross_overlap_magnitude = 0.0
     gross_overlap_capacity = 0.0
 
-    # Only pairs where both candles are owned by (start_index, end_index].
     for current_index in range(start_index + 2, end_index + 1):
         previous_index = current_index - 1
         previous_high = float(highs[previous_index])
@@ -266,6 +268,56 @@ def _overlap_metrics(
         else None
     )
     return gross_overlap_magnitude, gross_overlap_capacity, overlap_ratio
+
+
+def _close_ols_slope_metrics(
+    closes: Sequence[float] | None,
+    start_index: int,
+    end_index: int,
+    direction: str,
+    gross_candle_range: float | None,
+):
+    if closes is None:
+        return None, None, None
+    if start_index < 0 or end_index < start_index or end_index >= len(closes):
+        raise IndexError(
+            f"Close series does not cover Leg indexes {start_index}->{end_index}; len(closes)={len(closes)}"
+        )
+
+    active_bar_count = end_index - start_index
+    if active_bar_count < 2:
+        return None, None, None
+
+    owned_closes = [float(closes[i]) for i in range(start_index + 1, end_index + 1)]
+    n = len(owned_closes)
+    mean_x = (n + 1.0) / 2.0
+    mean_close = sum(owned_closes) / n
+    numerator = 0.0
+    denominator = 0.0
+    for offset, close_i in enumerate(owned_closes, start=1):
+        dx = float(offset) - mean_x
+        numerator += dx * (close_i - mean_close)
+        denominator += dx * dx
+
+    close_ols_slope = numerator / denominator
+    direction_sign = 1.0 if direction == "BULLISH" else -1.0
+    directional_close_ols_slope = direction_sign * close_ols_slope
+
+    mean_candle_range = (
+        gross_candle_range / active_bar_count
+        if gross_candle_range is not None and active_bar_count > 0
+        else None
+    )
+    normalized_directional_close_ols_slope = (
+        directional_close_ols_slope / mean_candle_range
+        if mean_candle_range is not None and mean_candle_range > 0.0
+        else None
+    )
+    return (
+        close_ols_slope,
+        directional_close_ols_slope,
+        normalized_directional_close_ols_slope,
+    )
 
 
 def build_confirmed_legs(
@@ -370,6 +422,18 @@ def build_confirmed_legs(
             end_index,
         )
 
+        (
+            close_ols_slope,
+            directional_close_ols_slope,
+            normalized_directional_close_ols_slope,
+        ) = _close_ols_slope_metrics(
+            closes,
+            start_index,
+            end_index,
+            direction,
+            gross_candle_range,
+        )
+
         legs.append(
             ConfirmedLeg(
                 start=left,
@@ -402,6 +466,9 @@ def build_confirmed_legs(
                 gross_overlap_magnitude=gross_overlap_magnitude,
                 gross_overlap_capacity=gross_overlap_capacity,
                 overlap_ratio=overlap_ratio,
+                close_ols_slope=close_ols_slope,
+                directional_close_ols_slope=directional_close_ols_slope,
+                normalized_directional_close_ols_slope=normalized_directional_close_ols_slope,
             )
         )
 
