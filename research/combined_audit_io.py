@@ -8,6 +8,7 @@ import io
 import json
 import math
 import re
+import subprocess
 import zipfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -17,11 +18,88 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from research.combined_audit_contract import MAIN_FEATURES, RAW_DIRECTION_SENSITIVE, TIMEFRAMES
+from research.combined_audit_contract import (
+    DETERMINISTIC_FLOAT_ABS_TOL,
+    DETERMINISTIC_FLOAT_REL_TOL,
+    DIRECTIONS,
+    FEATURE_ROLE_COLUMNS,
+    MAIN_FEATURES,
+    RAW_DIRECTION_SENSITIVE,
+    TIMEFRAMES,
+)
 
 
 FINAL_LOCK_STATUS = "FINAL LOCK / PASS"
 MANIFEST_MEMBER = "manifest.json"
+
+FEATURE_ROLE_FILENAME = "FEATURE_ROLE_MATRIX.csv"
+DETERMINISTIC_FILENAME = "DETERMINISTIC_IDENTITY_REPORT.csv"
+CROSS_TF_FILENAME = "CROSS_TF_RELATIONSHIP_REPORT.csv"
+COMBINED_MANIFEST_FILENAME = "COMBINED_AUDIT_MANIFEST.json"
+
+DETERMINISTIC_FIELDS = (
+    "timeframe",
+    "relation_id",
+    "formula",
+    "conditions",
+    "tolerance_policy",
+    "total_rows",
+    "verified_rows",
+    "failed_rows",
+)
+MAIN_FIELDS = (
+    "feature_x",
+    "feature_y",
+    "n_total",
+    "n_valid_pairwise",
+    "n_missing_x",
+    "n_missing_y",
+    "rho_raw",
+    "status",
+)
+PARTIAL_FIELDS = (
+    "feature_x",
+    "feature_y",
+    "rho_raw_for_delta",
+    "rho_duration_controlled",
+    "delta_rho",
+    "n_valid_triple",
+    "status",
+)
+SUPPLEMENTARY_FIELDS = (
+    "feature_x",
+    "feature_y",
+    "n_total",
+    "n_valid_pairwise",
+    "n_missing_x",
+    "n_missing_y",
+    "rho_raw",
+    "raw_status",
+    "rho_raw_for_delta",
+    "rho_duration_controlled",
+    "delta_rho",
+    "n_valid_triple",
+    "controlled_status",
+    "evidence_scope",
+)
+CROSS_TF_FIELDS = (
+    "feature_x",
+    "feature_y",
+    "controlled_eligible",
+    *(f"rho_{tf}" for tf in TIMEFRAMES),
+    *(f"controlled_rho_{tf}" for tf in TIMEFRAMES),
+    *(f"n_valid_{tf}" for tf in TIMEFRAMES),
+    "n_positive_tf",
+    "n_negative_tf",
+    "n_zero_tf",
+    "n_undefined_tf",
+    "sign_agreement_count",
+    "sign_agreement_tie",
+    "sign_agreement_modal_signs",
+    "rho_min",
+    "rho_max",
+    "rho_range",
+)
 
 IDENTITY_COLUMNS = (
     "signed_close_displacement",
@@ -444,6 +522,190 @@ def write_json(path: Path, payload: object) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(data)
+
+
+def _audit_code_commit() -> str:
+    """Return the repository HEAD independently of the checked-out branch name."""
+
+    repository = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = result.stdout.strip()
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        raise RuntimeError(f"git returned an invalid audit code commit: {commit!r}")
+    return commit
+
+
+def _combined_deterministic_rows(
+    reports_by_tf: Mapping[str, Sequence[Mapping[str, object]]],
+) -> list[dict[str, object]]:
+    combined: list[dict[str, object]] = []
+    for tf in TIMEFRAMES:
+        for row in reports_by_tf[tf]:
+            combined.append(
+                {
+                    "timeframe": tf,
+                    "relation_id": row["relation_id"],
+                    "formula": row["formula"],
+                    "conditions": (
+                        f"condition={row['condition']}; "
+                        f"undefined_when={row['undefined_when']}; "
+                        f"undefined_result={row['undefined_result']}"
+                    ),
+                    "tolerance_policy": row["tolerance_policy"],
+                    "total_rows": row["total_rows"],
+                    "verified_rows": row["verified_rows"],
+                    "failed_rows": row["failed_rows"],
+                }
+            )
+    return combined
+
+
+def _combined_supplementary_rows(
+    report: Mapping[str, object],
+) -> list[dict[str, object]]:
+    partial_by_pair = {
+        (row["feature_x"], row["feature_y"]): row
+        for row in report["partial"]
+    }
+    combined: list[dict[str, object]] = []
+    for raw in report["raw"]:
+        pair = (raw["feature_x"], raw["feature_y"])
+        partial = partial_by_pair.get(pair)
+        combined.append(
+            {
+                "feature_x": raw["feature_x"],
+                "feature_y": raw["feature_y"],
+                "n_total": raw["n_total"],
+                "n_valid_pairwise": raw["n_valid_pairwise"],
+                "n_missing_x": raw["n_missing_x"],
+                "n_missing_y": raw["n_missing_y"],
+                "rho_raw": raw["rho_raw"],
+                "raw_status": raw["status"],
+                "rho_raw_for_delta": (
+                    partial["rho_raw_for_delta"] if partial is not None else None
+                ),
+                "rho_duration_controlled": (
+                    partial["rho_duration_controlled"] if partial is not None else None
+                ),
+                "delta_rho": partial["delta_rho"] if partial is not None else None,
+                "n_valid_triple": (
+                    partial["n_valid_triple"] if partial is not None else None
+                ),
+                "controlled_status": partial["status"] if partial is not None else None,
+                "evidence_scope": "SUPPLEMENTARY_ONLY",
+            }
+        )
+    return combined
+
+
+def combined_audit_report_filenames() -> list[str]:
+    """Return every logical artifact name in deterministic order."""
+
+    names = {
+        FEATURE_ROLE_FILENAME,
+        DETERMINISTIC_FILENAME,
+        CROSS_TF_FILENAME,
+        COMBINED_MANIFEST_FILENAME,
+        *(f"MAIN_SPEARMAN_{tf}.csv" for tf in TIMEFRAMES),
+        *(f"PARTIAL_SPEARMAN_{tf}.csv" for tf in TIMEFRAMES),
+        *(
+            f"SUPPLEMENTARY_{tf}_{direction}.csv"
+            for tf in TIMEFRAMES
+            for direction in DIRECTIONS
+        ),
+    }
+    return sorted(names)
+
+
+def _combined_audit_manifest(bundle: AuditInputBundle) -> dict[str, object]:
+    input_manifest = bundle.manifest
+    metadata_by_tf = input_manifest["timeframes"]
+    passed_by_tf = {tf: True for tf in TIMEFRAMES}
+    return {
+        "analysis_feature_count": len(MAIN_FEATURES),
+        "audit_code_commit": _audit_code_commit(),
+        "audit_version": "1.0",
+        "broker_company": input_manifest["broker_company"],
+        "broker_server": input_manifest["broker_server"],
+        "control_variable": "active_bar_count",
+        "deterministic_float_abs_tol": DETERMINISTIC_FLOAT_ABS_TOL,
+        "deterministic_float_rel_tol": DETERMINISTIC_FLOAT_REL_TOL,
+        "input_leg_csv_filenames_by_tf": {
+            tf: metadata_by_tf[tf]["csv"] for tf in TIMEFRAMES
+        },
+        "input_lock_status": input_manifest["status"],
+        "input_locked_leg_source_commit": input_manifest["current_commit"],
+        "input_snapshot_filenames_by_tf": {
+            tf: metadata_by_tf[tf]["snapshot_file"] for tf in TIMEFRAMES
+        },
+        "input_zip_sha256": bundle.input_zip_sha256,
+        "numeric_finiteness_gate_passed_by_tf": dict(passed_by_tf),
+        "raw_cross_tf_pooling": False,
+        "report_filenames": combined_audit_report_filenames(),
+        "required_schema_gate_passed_by_tf": dict(passed_by_tf),
+        "snapshot_hash_gate_passed_by_tf": dict(passed_by_tf),
+        "snapshot_sha256_by_tf": {
+            tf: bundle.snapshot_sha256_by_tf[tf] for tf in TIMEFRAMES
+        },
+        "status_gate_passed": True,
+        "symbols_by_tf": {
+            tf: metadata_by_tf[tf]["symbol"] for tf in TIMEFRAMES
+        },
+        "timeframes": list(TIMEFRAMES),
+    }
+
+
+def write_combined_audit_outputs(
+    output_dir: Path,
+    *,
+    bundle: AuditInputBundle,
+    feature_roles: Sequence[Mapping[str, object]],
+    deterministic: Mapping[str, Sequence[Mapping[str, object]]],
+    main_reports: Mapping[str, Sequence[Mapping[str, object]]],
+    partial_reports: Mapping[str, Sequence[Mapping[str, object]]],
+    supplementary: Mapping[tuple[str, str], Mapping[str, object]],
+    cross_tf: Sequence[Mapping[str, object]],
+) -> None:
+    """Write the complete deterministic logical artifact directory."""
+
+    destination = Path(output_dir)
+    write_csv(
+        destination / FEATURE_ROLE_FILENAME,
+        feature_roles,
+        fieldnames=FEATURE_ROLE_COLUMNS,
+    )
+    write_csv(
+        destination / DETERMINISTIC_FILENAME,
+        _combined_deterministic_rows(deterministic),
+        fieldnames=DETERMINISTIC_FIELDS,
+    )
+    for tf in TIMEFRAMES:
+        write_csv(
+            destination / f"MAIN_SPEARMAN_{tf}.csv",
+            main_reports[tf],
+            fieldnames=MAIN_FIELDS,
+        )
+        write_csv(
+            destination / f"PARTIAL_SPEARMAN_{tf}.csv",
+            partial_reports[tf],
+            fieldnames=PARTIAL_FIELDS,
+        )
+        for direction in DIRECTIONS:
+            write_csv(
+                destination / f"SUPPLEMENTARY_{tf}_{direction}.csv",
+                _combined_supplementary_rows(supplementary[(tf, direction)]),
+                fieldnames=SUPPLEMENTARY_FIELDS,
+            )
+    write_csv(destination / CROSS_TF_FILENAME, cross_tf, fieldnames=CROSS_TF_FIELDS)
+    write_json(
+        destination / COMBINED_MANIFEST_FILENAME,
+        _combined_audit_manifest(bundle),
+    )
 
 
 def write_output_bundle(path: Path, members: Mapping[str, bytes | str]) -> None:
