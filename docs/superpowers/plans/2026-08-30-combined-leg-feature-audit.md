@@ -4,7 +4,7 @@
 
 **Goal:** Build an audit-only research pipeline that consumes the Final-Locked Leg evidence package and produces deterministic within-TF Spearman, duration-controlled Partial Spearman, deterministic-identity, direction-stratified, and cross-TF consistency reports without changing Swing or Leg Engine behavior.
 
-**Architecture:** Add a small research-only subsystem under `research/` with four responsibilities kept separate: frozen contract/roles, statistical primitives, report construction, and package I/O/CLI. The audit consumes existing locked CSV/manifest evidence from `GOLD_ACTIVITY_AUDIT_PACKAGE_FINAL_LOCKED.zip`; it never imports or recomputes Swing/Leg Engine outputs. Tests use synthetic rows/packages first, then the final task runs the completed audit against the locked Gold package and verifies non-regression and provenance.
+**Architecture:** Add a small research-only subsystem under `research/` with four responsibilities kept separate: frozen contract/roles, statistical primitives, report construction, and package I/O/CLI. The audit consumes existing locked CSV/manifest evidence from `GOLD_ACTIVITY_AUDIT_PACKAGE_FINAL_LOCKED.zip`; it never imports or recomputes Swing/Leg Engine outputs. Tests use synthetic rows/packages first. Production Gold statistical execution is a separately authorized phase and is not permitted merely by choosing an implementation execution mode.
 
 **Tech Stack:** Python 3.12, pytest, Python standard library only (`argparse`, `csv`, `dataclasses`, `hashlib`, `itertools`, `json`, `math`, `pathlib`, `statistics`, `subprocess`, `zipfile`). No SciPy/Pandas dependency is required for the statistical core.
 
@@ -26,22 +26,28 @@
 - Deterministic integer/count identities use exact equality.
 - Deterministic `None`/definedness/status identities use exact semantic equality.
 - Deterministic floating identities use `math.isclose(..., rel_tol=1e-12, abs_tol=1e-12)`; these values are fixed and recorded in the output manifest.
+- Every deterministic identity must classify every input Leg row as verified or failed; silent row skipping is forbidden.
+- Every deterministic identity report row must include `total_rows`, `verified_rows`, and `failed_rows`.
+- Deterministic coverage must satisfy `verified_rows + failed_rows == total_rows`; `failed_rows == 0` alone is never sufficient evidence of success.
+- Before any report calculation, each per-TF Leg CSV must pass the locked required-schema gate and numeric-finiteness gate.
+- Blank numeric cells parse to `None`; finite numeric text parses to the locked numeric type; `NaN`, `+Inf`, `-Inf`, and malformed numeric text are invalid inputs and stop execution.
 - No Outcome, Profit/Loss, MFE/MAE, Prediction, Good/Bad, Threshold, Score, Feature Weight, Accept/Reject, Optimization, PCA, Mutual Information, Clustering, qualitative strength label, or causal interpretation.
 - Do not modify `src/price_action_ai_swing_v1_locked.py`, `src/price_action_ai_leg_v0.py`, any locked Swing/Leg formula, or historical snapshots.
 - Audit implementation must consume locked evidence; it must not import the Swing or Leg Engine to regenerate features.
+- **Authorized execution scope before a separate human approval is Tasks 1–8 only. Task 9 is NOT AUTHORIZED.**
 
 ## Planned File Structure
 
 - Create `research/combined_audit_contract.py` — frozen feature roles, direction semantics, deterministic registry metadata, constants, and output schemas.
 - Create `research/combined_audit_stats.py` — average ranks, Pearson, pairwise Spearman, ranked OLS residuals, Partial Spearman, and explicit statuses.
 - Create `research/combined_audit_reports.py` — deterministic audit, main per-TF pair reports, supplementary direction-stratified reports, and cross-TF aggregation.
-- Create `research/combined_audit_io.py` — locked ZIP/manifest/CSV reader, provenance validation, deterministic CSV/JSON writer, output bundle creation.
+- Create `research/combined_audit_io.py` — locked ZIP/manifest/CSV reader, schema/finiteness/provenance validation, deterministic CSV/JSON writer, output bundle creation.
 - Create `research/run_combined_leg_feature_audit.py` — thin CLI orchestrator only.
 - Create `tests/test_combined_audit_contract.py` — exact frozen role/eligibility contract tests.
 - Create `tests/test_combined_audit_stats.py` — statistical primitive and edge-case tests.
-- Create `tests/test_combined_audit_deterministic.py` — identity/tolerance/zero-denominator tests.
+- Create `tests/test_combined_audit_deterministic.py` — identity/tolerance/coverage/zero-denominator tests.
 - Create `tests/test_combined_audit_reports.py` — pair counts, no-pooling, direction-stratification, sign accounting, and sample-policy tests.
-- Create `tests/test_combined_audit_io.py` — synthetic locked-package/provenance/output determinism tests.
+- Create `tests/test_combined_audit_io.py` — synthetic locked-package/schema/finiteness/provenance/output determinism tests.
 - Create `tests/test_combined_audit_integration.py` — end-to-end synthetic package test without touching production Engine code.
 
 ---
@@ -414,7 +420,7 @@ git commit -m "feat: add deterministic Spearman audit primitives"
 
 ---
 
-### Task 3: Implement the Deterministic Identity Auditor
+### Task 3: Implement the Deterministic Identity Auditor with non-vacuous coverage
 
 **Files:**
 - Create: `tests/test_combined_audit_deterministic.py`
@@ -423,7 +429,8 @@ git commit -m "feat: add deterministic Spearman audit primitives"
 **Interfaces:**
 - Consumes: one TF's parsed locked Leg rows as `list[dict[str, object]]`.
 - Produces: `build_deterministic_identity_report(rows) -> list[dict[str, object]]`.
-- One output row per locked identity, with relation ID, formula, conditions, tolerance policy, verified rows, failed rows.
+- One output row per locked identity, with relation ID, formula, conditions, tolerance policy, `total_rows`, `verified_rows`, and `failed_rows`.
+- Every input Leg row must be classified for every identity; there is no skipped-row state.
 
 - [ ] **Step 1: Write failing tests for locked Shadow sign and zero-denominator semantics**
 
@@ -443,10 +450,13 @@ def test_shadow_identity_uses_backward_minus_forward():
         "shadow_position_imbalance": 0.5,
     }]
     result = _by_id(build_deterministic_identity_report(rows))
-    assert result["SHADOW_POSITION_IMBALANCE"]["failed_rows"] == 0
+    row = result["SHADOW_POSITION_IMBALANCE"]
+    assert row["total_rows"] == 1
+    assert row["verified_rows"] == 1
+    assert row["failed_rows"] == 0
 
 
-def test_zero_shadow_denominator_requires_none_and_is_not_failure():
+def test_zero_shadow_denominator_requires_none_and_is_verified():
     rows = [{
         "gross_forward_shadow": 0.0,
         "gross_backward_shadow": 0.0,
@@ -454,13 +464,31 @@ def test_zero_shadow_denominator_requires_none_and_is_not_failure():
         "shadow_position_imbalance": None,
     }]
     result = _by_id(build_deterministic_identity_report(rows))
-    assert result["SHADOW_POSITION_IMBALANCE"]["verified_rows"] == 1
-    assert result["SHADOW_POSITION_IMBALANCE"]["failed_rows"] == 0
+    row = result["SHADOW_POSITION_IMBALANCE"]
+    assert row["total_rows"] == 1
+    assert row["verified_rows"] == 1
+    assert row["failed_rows"] == 0
 ```
 
-- [ ] **Step 2: Add tests for count exactness, slope chain, ratio `None`, and Activity identity**
+- [ ] **Step 2: Add tests for non-vacuous coverage, count exactness, slope chain, ratio `None`, and Activity identity**
 
 ```python
+def test_every_identity_accounts_for_every_input_row(full_identity_rows):
+    report = build_deterministic_identity_report(full_identity_rows)
+    for row in report:
+        assert row["total_rows"] == len(full_identity_rows)
+        assert row["verified_rows"] + row["failed_rows"] == row["total_rows"]
+
+
+def test_a_failed_row_is_counted_not_silently_skipped(full_identity_rows):
+    rows = [dict(r) for r in full_identity_rows]
+    rows[0]["shadow_position_imbalance"] = -rows[0]["shadow_position_imbalance"]
+    row = _by_id(build_deterministic_identity_report(rows))["SHADOW_POSITION_IMBALANCE"]
+    assert row["total_rows"] == len(rows)
+    assert row["verified_rows"] + row["failed_rows"] == len(rows)
+    assert row["failed_rows"] == 1
+
+
 def test_count_identity_uses_exact_equality():
     rows = [{
         "aligned_close_steps": 3,
@@ -524,7 +552,7 @@ def _optional_float_equal(expected, observed):
 
 Integer/count comparison uses `expected == observed` with no tolerance. `None` semantics use identity/definedness equality, not numeric replacement.
 
-- [ ] **Step 5: Implement all 11 locked identities**
+- [ ] **Step 5: Implement all 11 locked identities with total-row accounting**
 
 The reconstruction logic must use these exact formulas/conditions:
 
@@ -571,7 +599,21 @@ TICK_ACTIVITY_IDENTITY:
 gross_tick_activity = mean_tick_activity * active_bar_count
 ```
 
-Rows lacking an identity's required source fields because the source value is legitimately missing must be evaluated by the identity's locked `None` semantics; do not fill missing values with zero.
+For each identity:
+
+```python
+total_rows = len(rows)
+verified_rows = 0
+failed_rows = 0
+for row in rows:
+    if identity_holds(row):
+        verified_rows += 1
+    else:
+        failed_rows += 1
+assert verified_rows + failed_rows == total_rows
+```
+
+A legitimate source-level `None` is evaluated against the identity's locked `None` semantics and becomes either Verified or Failed. It is never skipped. Required columns are guaranteed structurally by Task 6; a missing required column must never reach this function during package execution.
 
 - [ ] **Step 6: Run deterministic tests to GREEN**
 
@@ -585,7 +627,7 @@ Expected: PASS.
 
 ```bash
 git add research/combined_audit_reports.py tests/test_combined_audit_deterministic.py
-git commit -m "feat: add deterministic Leg identity audit"
+git commit -m "feat: add non-vacuous deterministic Leg identity audit"
 ```
 
 ---
@@ -780,7 +822,6 @@ def test_cross_tf_sign_accounting_reports_tie_without_picking_sign():
 
 
 def test_cross_tf_range_ignores_undefined_not_zero():
-    # Uses the same fixture: defined raw rhos are -0.3, 0.0, 0.2.
     row = build_cross_tf_relationship_report(main_by_tf, {tf: [] for tf in main_by_tf})[0]
     assert row["rho_min"] == -0.3
     assert row["rho_max"] == 0.2
@@ -840,7 +881,7 @@ git commit -m "feat: add stratified and cross-TF audit reports"
 
 ---
 
-### Task 6: Read the Final-Locked Activity package and write deterministic audit artifacts
+### Task 6: Read and validate the Final-Locked Activity package before any calculation
 
 **Files:**
 - Create: `research/combined_audit_io.py`
@@ -851,6 +892,74 @@ git commit -m "feat: add stratified and cross-TF audit reports"
 - Produces: `AuditInputBundle(manifest, rows_by_tf, input_zip_sha256, snapshot_sha256_by_tf)`.
 - Produces: `load_locked_activity_package(path: Path) -> AuditInputBundle`.
 - Produces: deterministic `write_csv`, `write_json`, and `write_output_bundle` helpers.
+- Loader must complete package status, schema, numeric-finiteness, and snapshot/provenance checks before returning any rows for statistical report construction.
+
+#### Locked required Leg CSV schema
+
+Each TF CSV must contain all columns in the union below. Extra columns are allowed but never become implicit features.
+
+Main analysis features:
+
+```text
+active_bar_count
+net_thrust
+gross_close_path
+net_close_displacement
+directional_efficiency
+directional_continuity_ratio
+close_confirmation_ratio
+gap_path_share
+body_strength_ratio
+shadow_position_imbalance
+overlap_ratio
+normalized_directional_close_ols_slope
+mean_tick_activity
+```
+
+Raw direction-sensitive supplementary fields:
+
+```text
+close_ols_slope
+gross_upper_shadow
+gross_lower_shadow
+```
+
+Deterministic identity components not already listed above:
+
+```text
+signed_close_displacement
+aligned_close_steps
+opposing_close_steps
+flat_close_steps
+gap_path_contribution
+gross_body_magnitude
+gross_candle_range
+gross_forward_shadow
+gross_backward_shadow
+gross_shadow_magnitude
+gross_overlap_magnitude
+gross_overlap_capacity
+directional_close_ols_slope
+gross_tick_activity
+```
+
+Required traceability fields:
+
+```text
+leg_no
+direction
+start_index
+end_index
+start_time
+end_time
+start_kind
+end_kind
+start_price
+end_price
+owned_candle_count
+```
+
+If any required column is absent, the loader must stop before report construction with a `ValueError` whose message identifies the timeframe and lists all missing column names in deterministic sorted order.
 
 - [ ] **Step 1: Write failing package-loader tests with a synthetic ZIP**
 
@@ -870,7 +979,66 @@ def test_loader_uses_manifest_csv_names_and_preserves_tf_separation(tmp_path):
     assert bundle.rows_by_tf["M5"] is not bundle.rows_by_tf["M15"]
 ```
 
-- [ ] **Step 2: Add provenance tests for snapshot hashes and locked source metadata**
+- [ ] **Step 2: Add required-schema failure tests**
+
+```python
+def test_loader_rejects_missing_required_columns_before_reports(tmp_path):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        status="FINAL LOCK / PASS",
+        drop_columns_by_tf={"M15": {"mean_tick_activity", "gross_backward_shadow"}},
+    )
+    with pytest.raises(ValueError) as exc:
+        load_locked_activity_package(package)
+    message = str(exc.value)
+    assert "M15" in message
+    assert "gross_backward_shadow" in message
+    assert "mean_tick_activity" in message
+```
+
+The implementation must compute:
+
+```python
+missing = sorted(REQUIRED_LEG_COLUMNS - set(csv_header))
+```
+
+and raise before parsing report rows if `missing` is non-empty.
+
+- [ ] **Step 3: Add strict numeric-finiteness and malformed-value tests**
+
+```python
+@pytest.mark.parametrize("bad_text", ["NaN", "nan", "Inf", "+Inf", "-Inf", "Infinity", "-Infinity"])
+def test_loader_rejects_non_finite_numeric_text(tmp_path, bad_text):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        status="FINAL LOCK / PASS",
+        cell_override=("M30", 2, "mean_tick_activity", bad_text),
+    )
+    with pytest.raises(ValueError, match="M30"):
+        load_locked_activity_package(package)
+
+
+def test_loader_rejects_malformed_numeric_text(tmp_path):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        status="FINAL LOCK / PASS",
+        cell_override=("H1", 3, "overlap_ratio", "not-a-number"),
+    )
+    with pytest.raises(ValueError, match="overlap_ratio"):
+        load_locked_activity_package(package)
+
+
+def test_loader_maps_blank_numeric_cell_to_none(tmp_path):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        status="FINAL LOCK / PASS",
+        cell_override=("M5", 1, "overlap_ratio", ""),
+    )
+    bundle = load_locked_activity_package(package)
+    assert bundle.rows_by_tf["M5"][0]["overlap_ratio"] is None
+```
+
+- [ ] **Step 4: Add provenance tests for snapshot hashes and locked source metadata**
 
 The synthetic manifest follows the real package shape:
 
@@ -888,7 +1056,7 @@ The synthetic manifest follows the real package shape:
 
 Test that a mismatched snapshot hash raises an explicit `ValueError` rather than continuing.
 
-- [ ] **Step 3: Run I/O tests to verify RED**
+- [ ] **Step 5: Run I/O tests to verify RED**
 
 Run:
 ```bash
@@ -896,13 +1064,60 @@ pytest -q tests/test_combined_audit_io.py
 ```
 Expected: FAIL because I/O helpers do not exist.
 
-- [ ] **Step 4: Implement CSV parsing with explicit numeric/None conversion**
+- [ ] **Step 6: Implement required-schema validation before row calculations**
 
-Parse `""` as `None`. Parse known integer fields (`leg_no`, indexes, count fields, `gross_tick_activity`) as `int`. Parse locked numeric measurement fields as `float`. Parse `direction` and categorical/metadata as strings. Do not parse diagnostic `True/False` columns as features.
+Define `REQUIRED_LEG_COLUMNS` from the exact union documented above. For each TF:
+
+```python
+header = set(reader.fieldnames or [])
+missing = sorted(REQUIRED_LEG_COLUMNS - header)
+if missing:
+    raise ValueError(f"{tf}: missing required Leg CSV columns: {missing}")
+```
+
+This gate executes before any Spearman, Partial Spearman, deterministic reconstruction, or supplementary report construction.
+
+- [ ] **Step 7: Implement strict CSV parsing with explicit numeric/None conversion**
+
+Parser rules are locked:
+
+```text
+blank or whitespace-only numeric cell -> None
+finite numeric text -> locked int/float type
+NaN / +Inf / -Inf / Infinity variants -> ValueError
+malformed numeric text -> ValueError
+```
+
+Known integer-domain fields include:
+
+```text
+leg_no
+start_index
+end_index
+active_bar_count
+owned_candle_count
+aligned_close_steps
+opposing_close_steps
+flat_close_steps
+gross_tick_activity
+```
+
+For integer-domain fields, accept a finite numeric value only when it is exactly integral; reject fractional values. Known floating measurement fields parse to `float` and must satisfy `math.isfinite(value)`.
+
+Every numeric parse error must identify at least:
+
+```text
+timeframe
+1-based data row number
+column name
+raw cell value
+```
+
+Parse `direction`, kinds, timestamps, and categorical/metadata as strings. Do not parse diagnostic `True/False` columns as features.
 
 The loader must source per-TF leg CSV names from `manifest["timeframes"][tf]["csv"]`; it must not discover/merge arbitrary CSV files by glob.
 
-- [ ] **Step 5: Implement package and snapshot SHA verification**
+- [ ] **Step 8: Implement package and snapshot SHA verification**
 
 ```python
 def sha256_bytes(data):
@@ -911,17 +1126,19 @@ def sha256_bytes(data):
 
 For each TF, read the exact `snapshot_file` named by the manifest and require its SHA-256 to equal `snapshot_sha256`. Record the entire input ZIP SHA-256 separately for provenance. This validates input integrity; it does not recompute Swing or Leg metrics.
 
-- [ ] **Step 6: Implement deterministic writers**
+- [ ] **Step 9: Implement deterministic writers**
 
 CSV field order is supplied explicitly per report. JSON uses:
 
 ```python
-json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
 ```
+
+`allow_nan=False` is mandatory so non-finite values can never be silently serialized even if an upstream validation bug is introduced later.
 
 Do not insert current timestamps into output artifacts; identical inputs/code should produce byte-stable logical report content.
 
-- [ ] **Step 7: Run I/O tests to GREEN**
+- [ ] **Step 10: Run I/O tests to GREEN**
 
 Run:
 ```bash
@@ -929,11 +1146,11 @@ pytest -q tests/test_combined_audit_io.py
 ```
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add research/combined_audit_io.py tests/test_combined_audit_io.py
-git commit -m "feat: add locked audit-package I/O"
+git commit -m "feat: add strict locked audit-package I/O gates"
 ```
 
 ---
@@ -997,7 +1214,7 @@ SUPPLEMENTARY_H1_BEARISH.csv
 
 Each supplementary CSV contains both raw and controlled fields in one row schema, with `evidence_scope=SUPPLEMENTARY_ONLY`; `rho_duration_controlled` is `None` for pairs containing `active_bar_count`.
 
-- [ ] **Step 2: Add manifest assertions**
+- [ ] **Step 2: Add deterministic coverage and manifest assertions**
 
 ```python
 manifest = json.loads((output_dir / "COMBINED_AUDIT_MANIFEST.json").read_text())
@@ -1008,9 +1225,12 @@ assert manifest["control_variable"] == "active_bar_count"
 assert manifest["deterministic_float_rel_tol"] == 1e-12
 assert manifest["deterministic_float_abs_tol"] == 1e-12
 assert manifest["input_locked_leg_source_commit"] == "b43ed7a6d1d8538d8860934abbb24b0c9561a317"
+
+for row in read_csv(output_dir / "DETERMINISTIC_IDENTITY_REPORT.csv"):
+    assert int(row["verified_rows"]) + int(row["failed_rows"]) == int(row["total_rows"])
 ```
 
-The manifest must also record input ZIP SHA-256, broker/server, symbol per TF, snapshot hashes, audit code commit, and exact report filenames.
+The manifest must also record input ZIP SHA-256, broker/server, symbol per TF, snapshot hashes, audit code commit, exact report filenames, and the fact that required-schema/numeric-finiteness gates passed for all four TFs.
 
 - [ ] **Step 3: Run integration test to verify RED**
 
@@ -1025,7 +1245,7 @@ Expected: FAIL because CLI orchestration/output writing is incomplete.
 The CLI flow is exactly:
 
 ```python
-bundle = load_locked_activity_package(input_zip)
+bundle = load_locked_activity_package(input_zip)  # status/schema/finiteness/hash gates complete here
 feature_roles = feature_role_rows()
 for tf in TIMEFRAMES:
     rows = bundle.rows_by_tf[tf]
@@ -1043,6 +1263,19 @@ write_output_bundle(...)
 - [ ] **Step 5: Define deterministic output aggregation**
 
 `DETERMINISTIC_IDENTITY_REPORT.csv` contains a `timeframe` column plus the per-identity fields so all four TFs are represented without pooling row-level observations. This is report concatenation of already independent identity results, not statistical pooling.
+
+Each deterministic row contains:
+
+```text
+timeframe
+relation_id
+formula
+conditions
+tolerance_policy
+total_rows
+verified_rows
+failed_rows
+```
 
 `CROSS_TF_RELATIONSHIP_REPORT.csv` contains exactly 78 main pair rows.
 
@@ -1131,17 +1364,43 @@ tests/test_combined_audit_integration.py
 
 Any `src/` change is a blocker. Stop and open a separate Change Request rather than continuing.
 
-- [ ] **Step 4: Record implementation commit**
+- [ ] **Step 4: Record implementation commit and present Task 8 evidence**
 
 Run:
 ```bash
 git rev-parse HEAD
 ```
-Use that exact SHA as `audit_code_commit` when the Gold audit is executed in Task 9.
+
+Report the exact implementation SHA together with fresh test counts and the no-`src/` diff evidence to the user. Do not proceed to production Gold execution.
 
 ---
 
-### Task 9: Execute the Combined Audit on the Final-Locked Gold package and harden the evidence bundle
+## MANDATORY HUMAN APPROVAL GATE — BETWEEN TASK 8 AND TASK 9
+
+After Task 8:
+
+```text
+STOP.
+```
+
+Do not begin Task 9, open the Final-Locked Gold package for **statistical execution**, run the production Combined Audit CLI against it, or generate any Gold Combined Audit artifact until the user explicitly authorizes the production Gold Audit run.
+
+Selecting Subagent-Driven or Inline execution before this gate authorizes only:
+
+```text
+Authorized execution scope -> Tasks 1-8
+Task 9                    -> NOT AUTHORIZED
+```
+
+Completion of Task 8, passing tests, clean non-regression evidence, existence of the Gold ZIP, or prior approval of the Design Spec/Implementation Plan does **not** implicitly authorize Task 9.
+
+The executor must present Task 8 evidence and wait for an explicit user instruction authorizing the production Gold Audit before crossing this gate.
+
+---
+
+### Task 9: Execute the Combined Audit on the Final-Locked Gold package and harden the evidence bundle — NOT AUTHORIZED UNTIL HUMAN GATE PASSES
+
+**Authorization prerequisite:** Explicit user authorization issued after reviewing Task 8 evidence.
 
 **Files:**
 - Input only: `GOLD_ACTIVITY_AUDIT_PACKAGE_FINAL_LOCKED.zip`
@@ -1201,15 +1460,26 @@ assert manifest["raw_cross_tf_pooling"] is False
 
 Do not add `STRONG`, `WEAK`, `STABLE`, `UNSTABLE`, `REDUNDANT`, or `ORTHOGONAL` labels during review.
 
-- [ ] **Step 4: Verify every deterministic identity row has zero failures**
+- [ ] **Step 4: Verify complete deterministic coverage and zero failures for every identity and TF**
 
-Acceptance criterion:
+For every deterministic identity in every TF, all three counts are mandatory:
 
 ```text
+total_rows
+verified_rows
+failed_rows
+```
+
+Acceptance gate:
+
+```text
+verified_rows + failed_rows = total_rows
 failed_rows = 0
 ```
 
-for every identity in every TF. Any deterministic failure blocks the Combined Audit and must be investigated before statistical results are interpreted.
+A row satisfying a locked `None` rule, including zero-denominator cases, counts as `verified_rows += 1`. No Leg row may be skipped silently. `verified_rows = 0` and `failed_rows = 0` is not accepted as evidence for a non-empty TF input.
+
+Any coverage mismatch or deterministic failure blocks the Combined Audit and must be investigated before statistical results are interpreted.
 
 - [ ] **Step 5: Verify Partial sample discipline on every controlled row**
 
@@ -1283,13 +1553,13 @@ print(sha256(p.read_bytes()).hexdigest())
 PY
 ```
 
-Only after Tasks 8 and 9 have fresh passing evidence may the Combined Audit itself be presented for research review. Passing implementation tests alone does not authorize a statistical conclusion or Causal Replay transition.
+Only after Task 9 is separately authorized and Tasks 8 and 9 have fresh passing evidence may the Combined Audit itself be presented for research review. Passing implementation tests alone does not authorize a statistical conclusion or Causal Replay transition.
 
 ---
 
 ## Final Verification Checklist
 
-Before declaring implementation complete, verify all of the following with fresh evidence:
+Before declaring Tasks 1–8 implementation complete, verify all of the following with fresh evidence:
 
 - [ ] Design Spec SHA/branch is the approved Final-Locked version.
 - [ ] `MAIN_FEATURES` is exactly 13 and machine-tested.
@@ -1297,8 +1567,12 @@ Before declaring implementation complete, verify all of the following with fresh
 - [ ] Main Raw Spearman uses pairwise-complete samples and exact status precedence.
 - [ ] Partial Spearman uses triple-complete samples, average tie ranks, intercept residualization, `n_valid_triple >= 3`, and separate `rho_raw_for_delta`.
 - [ ] Deterministic identities use exact integer/status semantics and fixed `1e-12` float tolerances.
+- [ ] Every deterministic identity reports `total_rows`, `verified_rows`, `failed_rows`, and satisfies `verified_rows + failed_rows == total_rows` in tests.
 - [ ] Shadow identity is `backward - forward` and zero-total returns `None`.
 - [ ] Slope direction and normalization reproduce the exact locked Source-defined chain.
+- [ ] Loader rejects any TF CSV missing a required main/raw/identity/traceability column before report calculation.
+- [ ] Loader maps blank numeric cells to `None` and rejects all non-finite or malformed numeric text with TF/row/column context.
+- [ ] JSON output uses `allow_nan=False`.
 - [ ] Supplementary direction-sensitive analysis is same-TF and same-direction only.
 - [ ] Cross-TF output never pools raw observations and reports sign ties/undefined values explicitly.
 - [ ] No qualitative correlation labels are emitted.
@@ -1306,5 +1580,12 @@ Before declaring implementation complete, verify all of the following with fresh
 - [ ] Locked Leg tests pass freshly.
 - [ ] Combined Audit tests pass freshly.
 - [ ] `git diff` shows no `src/` modifications.
+- [ ] Task 8 evidence is presented to the user.
+- [ ] **STOP after Task 8. Task 9 remains NOT AUTHORIZED until explicit user approval.**
+
+After separate Task 9 authorization, additionally verify:
+
+- [ ] Production Gold required-schema and numeric-finiteness gates pass before calculations.
+- [ ] Every Gold deterministic identity/TF satisfies `verified_rows + failed_rows == total_rows` and `failed_rows == 0`.
 - [ ] Gold run is repeatable byte-for-byte for generated CSV/JSON logical artifacts.
 - [ ] Final evidence ZIP integrity passes and SHA-256 is recorded.
