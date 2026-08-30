@@ -2,13 +2,16 @@
 
 import math
 from collections.abc import Callable, Mapping, Sequence
+from itertools import combinations
 
 from research.combined_audit_contract import (
     DETERMINISTIC_FLOAT_ABS_TOL,
     DETERMINISTIC_FLOAT_REL_TOL,
     DETERMINISTIC_REGISTRY,
     DETERMINISTIC_RELATIONS,
+    MAIN_FEATURES,
 )
+from research.combined_audit_stats import partial_spearman_duration, spearman_pairwise
 
 
 FLOAT_TOLERANCE_POLICY = (
@@ -192,7 +195,68 @@ def build_deterministic_identity_report(
     return report
 
 
+def _column(rows: Sequence[Mapping[str, object]], name: str) -> list[object]:
+    """Return a report feature column while retaining missing values."""
+
+    return [row.get(name) for row in rows]
+
+
+def build_main_spearman_report(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Build the frozen pairwise-complete Main Spearman report for one TF."""
+
+    report: list[dict[str, object]] = []
+    for feature_x, feature_y in combinations(MAIN_FEATURES, 2):
+        result = spearman_pairwise(
+            _column(rows, feature_x),
+            _column(rows, feature_y),
+        )
+        report.append(
+            {
+                "feature_x": feature_x,
+                "feature_y": feature_y,
+                "n_total": result.n_total,
+                "n_valid_pairwise": result.n_valid_pairwise,
+                "n_missing_x": result.n_missing_x,
+                "n_missing_y": result.n_missing_y,
+                "rho_raw": result.rho_raw,
+                "status": result.status,
+            }
+        )
+    return report
+
+
+def build_partial_spearman_report(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Build duration-controlled, triple-complete Spearman results for one TF."""
+
+    active_bar_count = _column(rows, "active_bar_count")
+    report: list[dict[str, object]] = []
+    for feature_x, feature_y in combinations(MAIN_FEATURES[1:], 2):
+        result = partial_spearman_duration(
+            _column(rows, feature_x),
+            _column(rows, feature_y),
+            active_bar_count,
+        )
+        report.append(
+            {
+                "feature_x": feature_x,
+                "feature_y": feature_y,
+                "rho_raw_for_delta": result.rho_raw_for_delta,
+                "rho_duration_controlled": result.rho_duration_controlled,
+                "delta_rho": result.delta_rho,
+                "n_valid_triple": result.n_valid_triple,
+                "status": result.status,
+            }
+        )
+    return report
+
+
 __all__ = [
     "FLOAT_TOLERANCE_POLICY",
     "build_deterministic_identity_report",
+    "build_main_spearman_report",
+    "build_partial_spearman_report",
 ]
