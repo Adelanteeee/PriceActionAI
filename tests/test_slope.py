@@ -141,7 +141,6 @@ def test_start_index_close_is_excluded():
 
 def test_end_index_close_is_included():
     x = _build([0.0, 10.0, 12.0, 20.0])
-    # OLS on owned closes [10,12,20] with x=[1,2,3] -> beta=5
     assert math.isclose(x.close_ols_slope, 5.0)
 
 
@@ -155,7 +154,7 @@ def test_scheduled_gap_does_not_change_active_bar_indexing():
 
 def test_same_ols_slope_can_have_different_noise_structure():
     clean = _build([0.0, 10.0, 12.0, 14.0, 16.0])
-    noisy = _build([0.0, 8.0, 16.0, 10.0, 20.0])
+    noisy = _build([0.0, 10.0, 16.0, 8.0, 58.0 / 3.0])
     assert math.isclose(clean.close_ols_slope, noisy.close_ols_slope)
 
 
