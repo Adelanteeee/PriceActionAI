@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
+from numbers import Integral, Real
 from typing import Any, Iterable, Sequence
 
 UPSTREAM_SWING_INVARIANT_ERROR = "UPSTREAM_SWING_INVARIANT_ERROR"
@@ -41,6 +43,8 @@ class ConfirmedLeg:
     close_ols_slope: float | None = None
     directional_close_ols_slope: float | None = None
     normalized_directional_close_ols_slope: float | None = None
+    gross_tick_activity: int | None = None
+    mean_tick_activity: float | None = None
 
 
 @dataclass(frozen=True)
@@ -320,6 +324,49 @@ def _close_ols_slope_metrics(
     )
 
 
+def _tick_activity_metrics(
+    tick_volume: Sequence[Any] | None,
+    start_index: int,
+    end_index: int,
+):
+    if tick_volume is None:
+        return None, None
+    if start_index < 0 or end_index < start_index or end_index >= len(tick_volume):
+        raise IndexError(
+            "tick_volume series does not cover Leg indexes "
+            f"{start_index}->{end_index}; len(tick_volume)={len(tick_volume)}"
+        )
+
+    active_bar_count = end_index - start_index
+    if active_bar_count < 1:
+        raise AssertionError(
+            f"Confirmed Leg invariant failed: active_bar_count={active_bar_count}; expected >= 1"
+        )
+
+    gross_tick_activity = 0
+    for i in range(start_index + 1, end_index + 1):
+        value = tick_volume[i]
+        if isinstance(value, bool):
+            raise ValueError(f"Invalid tick_volume at owned index {i}: {value!r}")
+
+        if isinstance(value, Integral):
+            tick_count = int(value)
+        elif isinstance(value, Real):
+            numeric_value = float(value)
+            if not math.isfinite(numeric_value) or not numeric_value.is_integer():
+                raise ValueError(f"Invalid tick_volume at owned index {i}: {value!r}")
+            tick_count = int(numeric_value)
+        else:
+            raise ValueError(f"Invalid tick_volume at owned index {i}: {value!r}")
+
+        if tick_count < 0:
+            raise ValueError(f"Invalid tick_volume at owned index {i}: {value!r}")
+        gross_tick_activity += tick_count
+
+    mean_tick_activity = float(gross_tick_activity / active_bar_count)
+    return gross_tick_activity, mean_tick_activity
+
+
 def build_confirmed_legs(
     major_swings: Iterable[dict[str, Any]],
     *,
@@ -327,6 +374,7 @@ def build_confirmed_legs(
     highs: Sequence[float] | None = None,
     lows: Sequence[float] | None = None,
     closes: Sequence[float] | None = None,
+    tick_volume: Sequence[Any] | None = None,
     scheduled_gap_after_indices: Iterable[int] | None = None,
 ) -> LegBuildResult:
     swings = list(major_swings)
@@ -353,6 +401,10 @@ def build_confirmed_legs(
         start_index = int(left["index"])
         end_index = int(right["index"])
         active_bar_count = end_index - start_index
+        if active_bar_count < 1:
+            raise AssertionError(
+                f"Confirmed Leg invariant failed: active_bar_count={active_bar_count}; expected >= 1"
+            )
         net_thrust = abs(float(right["price"]) - float(left["price"]))
 
         (
@@ -434,6 +486,12 @@ def build_confirmed_legs(
             gross_candle_range,
         )
 
+        gross_tick_activity, mean_tick_activity = _tick_activity_metrics(
+            tick_volume,
+            start_index,
+            end_index,
+        )
+
         legs.append(
             ConfirmedLeg(
                 start=left,
@@ -469,6 +527,8 @@ def build_confirmed_legs(
                 close_ols_slope=close_ols_slope,
                 directional_close_ols_slope=directional_close_ols_slope,
                 normalized_directional_close_ols_slope=normalized_directional_close_ols_slope,
+                gross_tick_activity=gross_tick_activity,
+                mean_tick_activity=mean_tick_activity,
             )
         )
 
