@@ -10,6 +10,8 @@ from research.combined_audit_contract import (
     DETERMINISTIC_REGISTRY,
     DETERMINISTIC_RELATIONS,
     MAIN_FEATURES,
+    RAW_DIRECTION_SENSITIVE,
+    TIMEFRAMES,
 )
 from research.combined_audit_stats import partial_spearman_duration, spearman_pairwise
 
@@ -254,9 +256,179 @@ def build_partial_spearman_report(
     return report
 
 
+def build_direction_stratified_report(
+    rows: Sequence[Mapping[str, object]], direction: str
+) -> dict[str, object]:
+    """Build same-direction supplementary raw and duration-controlled tables.
+
+    The supplementary universe is deliberately broader than the main matrix,
+    but remains limited to analysis features and frozen raw direction-sensitive
+    fields.  Filtering happens before column extraction so no Bull/Bear values
+    can participate in the same statistic.
+    """
+
+    eligible = MAIN_FEATURES + RAW_DIRECTION_SENSITIVE
+    subset = [row for row in rows if row.get("direction") == direction]
+
+    raw: list[dict[str, object]] = []
+    for feature_x, feature_y in combinations(eligible, 2):
+        result = spearman_pairwise(
+            _column(subset, feature_x),
+            _column(subset, feature_y),
+        )
+        raw.append(
+            {
+                "feature_x": feature_x,
+                "feature_y": feature_y,
+                "n_total": result.n_total,
+                "n_valid_pairwise": result.n_valid_pairwise,
+                "n_missing_x": result.n_missing_x,
+                "n_missing_y": result.n_missing_y,
+                "rho_raw": result.rho_raw,
+                "status": result.status,
+                "evidence_scope": "SUPPLEMENTARY_ONLY",
+            }
+        )
+
+    control = _column(subset, "active_bar_count")
+    partial: list[dict[str, object]] = []
+    for feature_x, feature_y in combinations(eligible[1:], 2):
+        result = partial_spearman_duration(
+            _column(subset, feature_x),
+            _column(subset, feature_y),
+            control,
+        )
+        partial.append(
+            {
+                "feature_x": feature_x,
+                "feature_y": feature_y,
+                "rho_raw_for_delta": result.rho_raw_for_delta,
+                "rho_duration_controlled": result.rho_duration_controlled,
+                "delta_rho": result.delta_rho,
+                "n_valid_triple": result.n_valid_triple,
+                "status": result.status,
+                "evidence_scope": "SUPPLEMENTARY_ONLY",
+            }
+        )
+
+    return {
+        "source_row_count": len(subset),
+        "raw": raw,
+        "partial": partial,
+    }
+
+
+def _pair_index(
+    reports_by_tf: Mapping[str, Sequence[Mapping[str, object]]],
+) -> dict[str, dict[tuple[object, object], Mapping[str, object]]]:
+    """Index independently computed report rows by pair, never row position."""
+
+    return {
+        timeframe: {
+            (row["feature_x"], row["feature_y"]): row
+            for row in reports_by_tf.get(timeframe, ())
+        }
+        for timeframe in TIMEFRAMES
+    }
+
+
+def _cross_tf_pair_order(
+    main_index: Mapping[str, Mapping[tuple[object, object], Mapping[str, object]]]
+) -> list[tuple[object, object]]:
+    """Use frozen main-pair order, with deterministic support for direct inputs."""
+
+    observed_pairs = set().union(*(index.keys() for index in main_index.values()))
+    frozen_pairs = list(combinations(MAIN_FEATURES, 2))
+    ordered = [pair for pair in frozen_pairs if pair in observed_pairs]
+    extra_pairs = sorted(
+        observed_pairs - set(frozen_pairs),
+        key=lambda pair: (str(pair[0]), str(pair[1])),
+    )
+    return ordered + extra_pairs
+
+
+def build_cross_tf_relationship_report(
+    main_by_tf: Mapping[str, Sequence[Mapping[str, object]]],
+    partial_by_tf: Mapping[str, Sequence[Mapping[str, object]]],
+) -> list[dict[str, object]]:
+    """Compare independently calculated per-TF pair rows without pooling data."""
+
+    main_index = _pair_index(main_by_tf)
+    partial_index = _pair_index(partial_by_tf)
+    report: list[dict[str, object]] = []
+    for pair_key in _cross_tf_pair_order(main_index):
+        feature_x, feature_y = pair_key
+        controlled_eligible = "active_bar_count" not in pair_key
+        raw_values = [
+            main_index[timeframe].get(pair_key, {}).get("rho_raw")
+            for timeframe in TIMEFRAMES
+        ]
+        positive = sum(value is not None and value > 0 for value in raw_values)
+        negative = sum(value is not None and value < 0 for value in raw_values)
+        zero = sum(value is not None and value == 0 for value in raw_values)
+        undefined = sum(value is None for value in raw_values)
+        defined_values = [value for value in raw_values if value is not None]
+
+        if defined_values:
+            sign_counts = {
+                "NEGATIVE": negative,
+                "POSITIVE": positive,
+                "ZERO": zero,
+            }
+            agreement_count = max(sign_counts.values())
+            modal_signs = [
+                sign for sign, count in sign_counts.items() if count == agreement_count
+            ]
+            sign_agreement_tie: bool | None = len(modal_signs) > 1
+            rho_min: object = min(defined_values)
+            rho_max: object = max(defined_values)
+            rho_range: object = rho_max - rho_min
+        else:
+            agreement_count = None
+            sign_agreement_tie = None
+            modal_signs = None
+            rho_min = None
+            rho_max = None
+            rho_range = None
+
+        row: dict[str, object] = {
+            "feature_x": feature_x,
+            "feature_y": feature_y,
+            "controlled_eligible": controlled_eligible,
+            "n_positive_tf": positive,
+            "n_negative_tf": negative,
+            "n_zero_tf": zero,
+            "n_undefined_tf": undefined,
+            "sign_agreement_count": agreement_count,
+            "sign_agreement_tie": sign_agreement_tie,
+            "sign_agreement_modal_signs": modal_signs,
+            "rho_min": rho_min,
+            "rho_max": rho_max,
+            "rho_range": rho_range,
+        }
+        for timeframe in TIMEFRAMES:
+            main_row = main_index[timeframe].get(pair_key)
+            partial_row = partial_index[timeframe].get(pair_key)
+            row[f"rho_{timeframe}"] = (
+                main_row.get("rho_raw") if main_row is not None else None
+            )
+            row[f"n_valid_{timeframe}"] = (
+                main_row.get("n_valid_pairwise") if main_row is not None else None
+            )
+            row[f"controlled_rho_{timeframe}"] = (
+                partial_row.get("rho_duration_controlled")
+                if controlled_eligible and partial_row is not None
+                else None
+            )
+        report.append(row)
+    return report
+
+
 __all__ = [
     "FLOAT_TOLERANCE_POLICY",
     "build_deterministic_identity_report",
+    "build_direction_stratified_report",
+    "build_cross_tf_relationship_report",
     "build_main_spearman_report",
     "build_partial_spearman_report",
 ]
