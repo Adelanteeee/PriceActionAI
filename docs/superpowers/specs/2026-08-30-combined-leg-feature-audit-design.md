@@ -196,11 +196,26 @@ Each registry row must report:
 - formula
 - participating features
 - conditions
-- tolerance
+- tolerance policy
 - verified rows
 - failed rows
 
 For ratio identities, a zero denominator that is defined by the Engine to produce `None` is **not** an identity failure.
+
+### Locked deterministic tolerance policy
+Tolerance is fixed by this design and must not be selected, inferred, widened, tuned, or changed at runtime.
+
+- Integer/count identities: exact equality.
+- `None`/definedness/status identities: exact semantic equality.
+- Floating-point identities: `math.isclose(reconstructed, observed, rel_tol=1e-12, abs_tol=1e-12)`.
+
+The provenance manifest must record:
+```text
+deterministic_float_rel_tol = 1e-12
+deterministic_float_abs_tol = 1e-12
+```
+
+Any future change to these values requires a separate approved design change; the audit implementation may not adapt tolerance to the data.
 
 ### Close displacement identity
 Condition: `direction_sign ∈ {-1,+1}`.
@@ -336,13 +351,14 @@ AND pairwise-complete observations are used
 AND both valid inputs are non-constant
 ```
 
-### Missing-data policy
+### Missing-data and sample-size policy
 For each pair report:
 - `n_total`
 - `n_valid_pairwise`
 - `n_missing_x`
 - `n_missing_y`
 - `rho_raw`
+- correlation status
 
 Rules:
 - pairwise complete observations only;
@@ -350,15 +366,10 @@ Rules:
 - no silent zero-filling;
 - undefined correlation is not converted to zero.
 
-If an eligible input is constant on the valid pairwise sample, report:
-```text
-UNDEFINED_CONSTANT_INPUT
-```
-
-If valid observations are insufficient for the correlation calculation, report:
-```text
-UNDEFINED_INSUFFICIENT_OBSERVATIONS
-```
+Status precedence for Main Raw Spearman:
+1. if `n_valid_pairwise < 2`, report `UNDEFINED_INSUFFICIENT_OBSERVATIONS`;
+2. otherwise, if either input is constant on the valid pairwise sample, report `UNDEFINED_CONSTANT_INPUT`;
+3. otherwise compute `rho_raw`.
 
 No qualitative interpretation is attached to the magnitude.
 
@@ -369,35 +380,62 @@ active_bar_count
 ```
 
 Partial Spearman is calculated only when:
-- the pair is main-pair eligible;
+- the pair is main-pair eligible by role/direction/numeric rules;
 - `X != active_bar_count`;
 - `Y != active_bar_count`.
 
-### Exact method
-For the pairwise-complete sample of `X`, `Y`, and `active_bar_count`:
-1. convert each variable to ranks;
-2. use **average ranks for ties**;
-3. regress ranked `X` on ranked `active_bar_count` with an intercept;
-4. regress ranked `Y` on ranked `active_bar_count` with an intercept;
-5. compute the ordinary correlation of the two residual series.
+### Triple-complete sample
+The controlled calculation uses the exact sample on which all three values are defined:
 
-Required outputs:
-- `rho_raw`
+```text
+X + Y + active_bar_count
+```
+
+Let:
+```text
+n_valid_triple = number of triple-complete observations
+```
+
+No row excluded from the Partial calculation may be used in the raw comparator for `delta_rho`.
+
+### Exact method
+On the exact triple-complete sample:
+1. if `n_valid_triple < 3`, report `UNDEFINED_INSUFFICIENT_OBSERVATIONS`;
+2. convert `X`, `Y`, and `active_bar_count` to ranks;
+3. use **average ranks for ties**;
+4. if any required ranked input is constant, report `UNDEFINED_CONSTANT_INPUT`;
+5. regress ranked `X` on ranked `active_bar_count` with an intercept;
+6. regress ranked `Y` on ranked `active_bar_count` with an intercept;
+7. if either residual series is constant, report `UNDEFINED_CONSTANT_INPUT`;
+8. compute the ordinary correlation of the two residual series as `rho_duration_controlled`.
+
+### Raw comparator used for delta
+The Main Raw Spearman matrix remains defined independently on the pairwise-complete `X + Y` sample.
+
+For `delta_rho`, however, use a separate raw value calculated on the **same triple-complete sample** used by Partial Spearman:
+
+```text
+rho_raw_for_delta
+= Spearman(X, Y)
+  on the exact same triple-complete sample
+```
+
+Then:
+```text
+delta_rho
+= rho_duration_controlled - rho_raw_for_delta
+```
+
+The main pairwise `rho_raw` and `rho_raw_for_delta` are distinct reported values and must not be silently substituted for one another.
+
+Required Partial report outputs:
+- `rho_raw_for_delta`
 - `rho_duration_controlled`
-- `delta_rho = rho_duration_controlled - rho_raw`
-- `n_valid`
+- `delta_rho`
+- `n_valid_triple`
+- status
 
 The controlled statistic is a statistical adjustment only. It must never be described as causal.
-
-If either residual series is constant:
-```text
-UNDEFINED_CONSTANT_INPUT
-```
-
-If valid observations are insufficient:
-```text
-UNDEFINED_INSUFFICIENT_OBSERVATIONS
-```
 
 ## Supplementary direction-stratified audit
 A stratified pair is eligible only when:
@@ -411,6 +449,8 @@ AND numeric
 AND pairwise complete
 AND both valid inputs are non-constant
 ```
+
+The same missing, insufficient-observation, and constant-input semantics used by the corresponding raw or controlled calculation apply inside each direction stratum.
 
 Supporting and identity components remain excluded unless a separate result is explicitly emitted under `SUPPLEMENTARY_COMPONENT_AUDIT`.
 
@@ -431,19 +471,57 @@ For every eligible main feature pair, report the separately calculated within-TF
 - `n_valid_M15`
 - `n_valid_M30`
 - `n_valid_H1`
+- `n_positive_tf`
+- `n_negative_tf`
+- `n_zero_tf`
+- `n_undefined_tf`
 - `sign_agreement_count`
+- `sign_agreement_tie`
+- `sign_agreement_modal_signs`
 - `rho_min`
 - `rho_max`
 - `rho_range`
 
-Definition:
+### Cross-TF sign accounting
+For the four per-TF raw `rho` values:
+
+```text
+n_positive_tf  = count(defined rho_TF > 0)
+n_negative_tf  = count(defined rho_TF < 0)
+n_zero_tf      = count(defined rho_TF == 0)
+n_undefined_tf = count(undefined rho_TF)
+```
+
+Then:
+```text
+sign_agreement_count
+= max(n_positive_tf, n_negative_tf, n_zero_tf)
+```
+
+Only defined values participate in positive/negative/zero counts. Undefined values are counted only in `n_undefined_tf` and never converted to zero.
+
+If more than one of `n_positive_tf`, `n_negative_tf`, and `n_zero_tf` equals `sign_agreement_count`, report:
+```text
+sign_agreement_tie = true
+```
+
+and list every tied modal sign in:
+```text
+sign_agreement_modal_signs
+```
+
+No modal sign may be selected arbitrarily in a tie. If there is no defined rho value, `sign_agreement_count`, `sign_agreement_tie`, and `sign_agreement_modal_signs` remain undefined rather than fabricating a sign result.
+
+### Cross-TF range
 ```text
 rho_range = max(defined rho_TF values) - min(defined rho_TF values)
 ```
 
 Undefined timeframe values remain undefined and are excluded from min/max/range calculations. They are never replaced with zero.
 
-`sign_agreement_count` is descriptive only. A tiny positive or negative rho still has a mathematical sign, but sign agreement by itself must never be interpreted as meaningful stability.
+All sign fields are descriptive only. A tiny positive or negative rho still has a mathematical sign, but sign agreement by itself must never be interpreted as meaningful stability.
+
+The same no-pooling rule applies to controlled values: each `controlled_rho_TF` is computed independently within that TF.
 
 ## Deterministic precedence rule
 For any pair or feature set that participates in a deterministic identity:
@@ -469,7 +547,8 @@ The implementation plan may refine file names, but the audit must preserve these
 
 2. `DETERMINISTIC_IDENTITY_REPORT`
    - one row/result per locked identity
-   - conditions and tolerance
+   - conditions
+   - fixed tolerance policy
    - verified/failed counts
 
 3. Per-timeframe `MAIN_SPEARMAN_PAIR_REPORT`
@@ -478,15 +557,17 @@ The implementation plan may refine file names, but the audit must preserve these
    - raw rho/status
 
 4. Per-timeframe `PARTIAL_SPEARMAN_PAIR_REPORT`
+   - `rho_raw_for_delta` on triple-complete sample
    - controlled rho
    - delta rho
-   - sample size/status
+   - triple-complete sample size/status
 
 5. Per-timeframe and direction `SUPPLEMENTARY_DIRECTION_STRATIFIED_REPORT`
 
 6. `CROSS_TF_RELATIONSHIP_REPORT`
    - separate per-TF raw/controlled values
-   - descriptive sign agreement and range fields
+   - positive/negative/zero/undefined TF counts
+   - descriptive sign agreement, tie state, and range fields
 
 7. Provenance manifest
    - source commit
@@ -495,6 +576,8 @@ The implementation plan may refine file names, but the audit must preserve these
    - broker/server
    - timeframes
    - audit version
+   - `deterministic_float_rel_tol = 1e-12`
+   - `deterministic_float_abs_tol = 1e-12`
 
 ## Non-regression requirements
 This audit is a consumer of frozen outputs. It must not change:
@@ -514,10 +597,13 @@ The design is satisfied when the future implementation can demonstrate all of th
 1. exactly 13 main analysis features are used;
 2. feature roles and direction semantics are explicit and machine-verifiable;
 3. deterministic identities are checked separately and take precedence over statistical results;
-4. Raw Spearman is computed only within one timeframe at a time;
-5. Partial Spearman controls only `active_bar_count` using ranked residual regression with intercept and average tie ranks;
-6. missingness and pairwise sample sizes are explicit for every pair;
-7. constant/insufficient cases remain undefined with explicit status, never zero-filled;
-8. raw direction-sensitive fields are excluded from the combined Bull+Bear main matrix and audited only in supplementary same-direction groups;
-9. cross-timeframe output compares independently computed relationships and never pools raw rows;
-10. no outcome, prediction, score, threshold, qualitative strength label, optimization, or causal claim is introduced.
+4. deterministic integer/status identities use exact equality and floating identities use fixed `rel_tol=1e-12`, `abs_tol=1e-12`;
+5. Raw Spearman is computed only within one timeframe at a time and uses pairwise-complete `X + Y` observations;
+6. Main Raw Spearman reports insufficient when `n_valid_pairwise < 2`, then separately checks constant inputs;
+7. Partial Spearman controls only `active_bar_count` using triple-complete observations, average tie ranks, ranked residual regression with intercept, and `n_valid_triple >= 3`;
+8. `rho_raw_for_delta` is recalculated on the exact triple-complete Partial sample, and `delta_rho` never uses the main pairwise raw rho unless the samples happen to be identical;
+9. missingness and sample sizes are explicit for every pair; no imputation or zero-filling occurs;
+10. constant/insufficient cases remain undefined with explicit status;
+11. raw direction-sensitive fields are excluded from the combined Bull+Bear main matrix and audited only in supplementary same-direction groups;
+12. cross-timeframe output compares independently computed relationships, reports positive/negative/zero/undefined counts and ties explicitly, and never pools raw rows;
+13. no outcome, prediction, score, threshold, qualitative strength label, optimization, or causal claim is introduced.
