@@ -82,6 +82,9 @@ TASK10_DEPENDENCY_REDUNDANCY_INTERPRETATION_PACKAGE.zip
 - Produce `MAIN_PAIR_KEYS`, `PARTIAL_PAIR_KEYS`, `CONTROL_PAIR_KEYS`, `SUPPLEMENTARY_PAIR_KEYS`.
 - Produce `CONTROL_NOT_APPLICABLE = "NOT_APPLICABLE_CONTROL_FEATURE"`.
 - Produce stable pair-key helpers and output filenames.
+- Produce `TASK10_LOGICAL_FILENAMES` as the exact five-file logical-output contract.
+- Produce `SUPPLEMENTARY_OUTPUT_FIELDS` as the exact ordered CSV schema.
+- Produce `validate_observation_text(text: str) -> None` for prohibited qualitative decision language.
 
 - [ ] **Step 1: Write RED count tests**
 
@@ -156,7 +159,148 @@ def pair_key(x: str, y: str) -> str:
     return f"{a}__{b}"
 ```
 
-- [ ] **Step 5: Run GREEN and commit**
+- [ ] **Step 5: Freeze exact physical output names and Supplementary CSV column order**
+
+```python
+MAIN_DOSSIERS_FILENAME = "TASK10_MAIN_RELATIONSHIP_DOSSIERS.json"
+SUPPLEMENTARY_FILENAME = "TASK10_SUPPLEMENTARY_EVIDENCE.csv"
+FEATURE_DOSSIERS_FILENAME = "TASK10_FEATURE_DOSSIERS.json"
+HYPOTHESES_FILENAME = "TASK10_FUTURE_ABLATION_HYPOTHESES.json"
+MANIFEST_FILENAME = "TASK10_MANIFEST.json"
+OUTPUT_ZIP_FILENAME = "TASK10_DEPENDENCY_REDUNDANCY_INTERPRETATION_PACKAGE.zip"
+
+TASK10_LOGICAL_FILENAMES = (
+    MAIN_DOSSIERS_FILENAME,
+    SUPPLEMENTARY_FILENAME,
+    FEATURE_DOSSIERS_FILENAME,
+    HYPOTHESES_FILENAME,
+    MANIFEST_FILENAME,
+)
+
+SUPPLEMENTARY_OUTPUT_FIELDS = (
+    "timeframe",
+    "direction",
+    "source_artifact",
+    "pair_key",
+    "feature_x",
+    "feature_y",
+    "contains_raw_direction_sensitive",
+    "is_main_pair",
+    "n_total",
+    "n_valid_pairwise",
+    "n_missing_x",
+    "n_missing_y",
+    "rho_raw",
+    "raw_status",
+    "rho_raw_for_delta",
+    "rho_duration_controlled",
+    "delta_rho",
+    "n_valid_triple",
+    "controlled_status",
+    "evidence_scope",
+)
+```
+
+Add an exact-order contract test:
+
+```python
+def test_task10_output_names_and_supplementary_csv_schema_are_exact():
+    assert TASK10_LOGICAL_FILENAMES == (
+        "TASK10_MAIN_RELATIONSHIP_DOSSIERS.json",
+        "TASK10_SUPPLEMENTARY_EVIDENCE.csv",
+        "TASK10_FEATURE_DOSSIERS.json",
+        "TASK10_FUTURE_ABLATION_HYPOTHESES.json",
+        "TASK10_MANIFEST.json",
+    )
+    assert SUPPLEMENTARY_OUTPUT_FIELDS == (
+        "timeframe",
+        "direction",
+        "source_artifact",
+        "pair_key",
+        "feature_x",
+        "feature_y",
+        "contains_raw_direction_sensitive",
+        "is_main_pair",
+        "n_total",
+        "n_valid_pairwise",
+        "n_missing_x",
+        "n_missing_y",
+        "rho_raw",
+        "raw_status",
+        "rho_raw_for_delta",
+        "rho_duration_controlled",
+        "delta_rho",
+        "n_valid_triple",
+        "controlled_status",
+        "evidence_scope",
+    )
+```
+
+- [ ] **Step 6: Restore Observation Safety contract and tests**
+
+```python
+import pytest
+
+from research.task10_interpretation_contract import validate_observation_text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Feature X is STRONG",
+        "feature x is weak",
+        "this is redundant",
+        "KEEP feature x",
+        "drop feature y",
+        "near_duplicate candidate",
+    ],
+)
+def test_observation_text_rejects_decision_language(text):
+    with pytest.raises(ValueError):
+        validate_observation_text(text)
+
+
+def test_observation_text_allows_exact_numeric_description():
+    validate_observation_text(
+        "M15 raw rho=-0.21; controlled rho=-0.08; delta_rho=0.13"
+    )
+```
+
+Implement with word-boundary, case-insensitive matching over this exact frozen set:
+
+```python
+import re
+
+_PROHIBITED_QUALITATIVE_TERMS = (
+    "STRONG",
+    "WEAK",
+    "STABLE",
+    "UNSTABLE",
+    "REDUNDANT",
+    "ORTHOGONAL",
+    "NEAR_DUPLICATE",
+    "KEEP",
+    "DROP",
+    "BEST",
+    "WORST",
+    "IMPORTANT",
+    "UNIMPORTANT",
+)
+_PROHIBITED_RE = re.compile(
+    r"\b(?:" + "|".join(map(re.escape, _PROHIBITED_QUALITATIVE_TERMS)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def validate_observation_text(text: str) -> None:
+    match = _PROHIBITED_RE.search(text)
+    if match:
+        raise ValueError(
+            f"Task 10 observation contains prohibited qualitative term: {match.group(0)!r}"
+        )
+```
+
+- [ ] **Step 7: Run GREEN and commit**
 
 ```bash
 pytest -q tests/test_task10_interpretation_contract.py
@@ -289,6 +433,7 @@ git commit -m "feat: add strict Task 10 evidence loader"
 
 **Interfaces:**
 - `build_main_relationship_dossiers(bundle) -> list[dict[str, object]]`.
+- `build_neutral_observations(dossier) -> list[str]`.
 - No Task 10 call to `spearman_pairwise()` or `partial_spearman_duration()`.
 
 - [ ] **Step 1: Write RED required-field test**
@@ -417,7 +562,54 @@ assert n_defined_tf + cross_row["n_undefined_tf"] == 4
 
 If defined is empty, `rho_min/rho_max/rho_range` must all be `None`. Otherwise reconstruct min/max/range from defined values only and require exact equality with Task 9. Exactly one defined TF may legitimately have `rho_range == 0`, but `n_defined_tf` must remain `1`.
 
-- [ ] **Step 7: Add static no-recompute test**
+- [ ] **Step 7: Build neutral descriptive observations from exact values only**
+
+`build_neutral_observations(dossier)` must return a deterministic-order list. Start with these exact-value templates:
+
+```python
+observations = [
+    (
+        "RAW_SIGN_COUNTS "
+        f"positive={cross['n_positive_tf']} "
+        f"negative={cross['n_negative_tf']} "
+        f"zero={cross['n_zero_tf']} "
+        f"undefined={cross['n_undefined_tf']}"
+    ),
+    (
+        "RAW_DEFINED_TF "
+        f"n_defined_tf={cross['n_defined_tf']} "
+        f"rho_min={cross['rho_min']} "
+        f"rho_max={cross['rho_max']} "
+        f"rho_range={cross['rho_range']}"
+    ),
+]
+```
+
+For each TF append exactly one Raw observation in this shape:
+
+```text
+M5 RAW rho=<value> status=<status> n_valid_pairwise=<n>
+```
+
+For each eligible pair append one Controlled observation per TF in this shape:
+
+```text
+M5 CONTROLLED rho_raw_for_delta=<a> rho_duration_controlled=<b> delta_rho=<c> status=<status> n_valid_triple=<n>
+```
+
+For each control-feature pair append instead:
+
+```text
+M5 CONTROLLED NOT_APPLICABLE_CONTROL_FEATURE
+```
+
+Use M5/M15/M30/H1 in frozen `TIMEFRAMES` order. Run every generated observation through `validate_observation_text()` before returning it.
+
+Do not use words such as stronger, weaker, stable, redundant, independent, important, useful, better, worse, keep, drop, or near-duplicate. Observation text is descriptive only; it must not contain a score, rank, cutoff, removal recommendation, causal statement, or qualitative magnitude/stability label.
+
+Add tests that generated observations are deterministic, use only exact source values/statuses/sample counts, and are accepted by `validate_observation_text()`; also retain the Task 1 forbidden-label tests.
+
+- [ ] **Step 8: Add static no-recompute test**
 
 ```python
 from pathlib import Path
@@ -429,7 +621,7 @@ def test_task10_reports_do_not_recompute_task9_statistics():
     assert "partial_spearman_duration(" not in text
 ```
 
-- [ ] **Step 8: Run GREEN and commit**
+- [ ] **Step 9: Run GREEN and commit**
 
 ```bash
 pytest -q tests/test_task10_interpretation_reports.py
@@ -611,17 +803,22 @@ _run_task10_from_bundle(
 
 Add a test that `inspect.signature(run_task10)` contains neither `expected_sha256` nor `implementation_commit` nor `loader`.
 
-- [ ] **Step 4: Manifest must use the pre-output validated commit**
+- [ ] **Step 4: Manifest must use the pre-output validated commit and explicit scope flags**
 
 `write_task10_outputs()` receives `implementation_commit` as an argument. It must not independently call `git rev-parse` while writing the manifest.
 
-Manifest includes:
+Manifest fields must include at least:
 
 ```python
 {
+    "task": "Task 10 Dependency / Redundancy Interpretation",
     "task10_spec_commit": TASK10_SPEC_COMMIT,
     "task10_implementation_commit": implementation_commit,
+    "task9_evidence_package_filename": TASK9_EVIDENCE_PACKAGE_FILENAME,
     "task9_evidence_package_sha256": bundle.evidence_zip_sha256,
+    "task9_activity_input_sha256": TASK9_ACTIVITY_INPUT_SHA256,
+    "task9_audit_code_commit": TASK9_AUDIT_CODE_COMMIT,
+    "task9_registration_commit": TASK9_REGISTRATION_COMMIT,
     "main_relationship_dossier_count": 78,
     "partial_delta_eligible_pair_count": 66,
     "control_feature_non_applicable_pair_count": 12,
@@ -632,14 +829,39 @@ Manifest includes:
     "new_association_statistics_computed": False,
     "ranking_performed": False,
     "cutoff_applied": False,
+    "threshold_applied": False,
+    "score_computed": False,
+    "outcome_used": False,
     "ablation_executed": False,
     "causal_replay_executed": False,
+    "feature_removal_recommended": False,
 }
+```
+
+The following are mandatory scope-state fields, not optional annotations:
+
+```text
+score_computed = false
+outcome_used = false
+feature_removal_recommended = false
+threshold_applied = false
+```
+
+Reject manifest construction if any locked output count differs or if any mandatory scope-state field above is absent or not exactly `False`.
+
+Add integration assertions:
+
+```python
+assert manifest["task9_evidence_package_filename"] == TASK9_EVIDENCE_PACKAGE_FILENAME
+assert manifest["score_computed"] is False
+assert manifest["outcome_used"] is False
+assert manifest["feature_removal_recommended"] is False
+assert manifest["threshold_applied"] is False
 ```
 
 - [ ] **Step 5: Deterministic writer/repeatability tests**
 
-Write JSON with sorted keys, `allow_nan=False`; CSV with frozen fields and `\n`; ZIP with sorted members, timestamp `(1980,1,1,0,0,0)`, deflate level 9, stable Unix mode. Run the private synthetic seam twice with the same fixed test commit and require all five logical files and both ZIPs byte-identical.
+Write JSON with sorted keys, `allow_nan=False`; write Supplementary CSV with exact `SUPPLEMENTARY_OUTPUT_FIELDS` column order, `extrasaction="raise"`, and `\n`; ZIP with sorted members, timestamp `(1980,1,1,0,0,0)`, deflate level 9, stable Unix mode. Run the private synthetic seam twice with the same fixed test commit and require all five logical files and both ZIPs byte-identical.
 
 - [ ] **Step 6: CLI has only production-safe arguments**
 
@@ -789,9 +1011,18 @@ Logical files                       = 5
 
 Every main dossier must contain all mandatory role/provenance fields and satisfy `n_defined_tf + n_undefined_tf = 4`.
 
-- [ ] **Step 6: Validate manifest provenance**
+- [ ] **Step 6: Validate manifest provenance and scope-state flags**
 
 `task10_implementation_commit` must exactly equal the clean committed HEAD returned before output generation. It must not refer to an earlier commit while executing uncommitted code.
+
+Manifest must also retain exact no-scope states:
+
+```text
+score_computed = false
+outcome_used = false
+feature_removal_recommended = false
+threshold_applied = false
+```
 
 - [ ] **Step 7: Re-run full repository tests, report, and stop**
 
@@ -815,5 +1046,8 @@ Then stop.
 - [ ] Lock Record is in scope allowlist.
 - [ ] Production requires clean tracked worktree, clean index, and Task 10 files committed at HEAD.
 - [ ] Manifest implementation SHA is captured before output from the clean committed state.
+- [ ] `TASK10_LOGICAL_FILENAMES` is exactly the locked five-file set and Supplementary CSV uses exact `SUPPLEMENTARY_OUTPUT_FIELDS` column order.
+- [ ] `build_neutral_observations()` emits exact-value descriptive text only and every observation passes `validate_observation_text()`.
+- [ ] Manifest contains `task9_evidence_package_filename` and exact `score_computed=false`, `outcome_used=false`, `feature_removal_recommended=false`, and `threshold_applied=false` scope flags.
 - [ ] Counts remain 78 / 66 / 12 / 13 / 960 / 0 / 5.
 - [ ] No statistical recomputation, ranking, cutoff, qualitative label, Ablation, or Causal Replay is introduced.
