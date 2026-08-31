@@ -154,7 +154,7 @@ def test_none_branches_are_explicit_in_deterministic_registry():
         "GAP_PATH_SHARE": "gross_close_path == 0",
         "SHADOW_POSITION_IMBALANCE": "gross_shadow_magnitude == 0",
         "OVERLAP_RATIO": "gross_overlap_capacity == 0",
-        "SLOPE_NORMALIZATION": "mean_candle_range is None or mean_candle_range <= 0",
+        "SLOPE_NORMALIZATION": "active_bar_count < 2 (Source-defined directional_close_ols_slope and normalized_directional_close_ols_slope are None), or mean_candle_range is None or mean_candle_range <= 0",
     }
     for relation_id, undefined_when in expected.items():
         metadata = DETERMINISTIC_REGISTRY[relation_id]
