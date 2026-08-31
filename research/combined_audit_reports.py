@@ -114,12 +114,29 @@ def _overlap_ratio(row: Mapping[str, object]) -> bool:
 
 def _slope_direction(row: Mapping[str, object]) -> bool:
     direction_sign = {"BULLISH": 1, "BEARISH": -1}[row["direction"]]
+    if row["active_bar_count"] < 2:
+        return (
+            row["close_ols_slope"] is None
+            and row["directional_close_ols_slope"] is None
+        )
+    if (
+        row["close_ols_slope"] is None
+        or row["directional_close_ols_slope"] is None
+    ):
+        return False
     expected = direction_sign * row["close_ols_slope"]
     return _float_equal(expected, row["directional_close_ols_slope"])
 
 
 def _slope_normalization(row: Mapping[str, object]) -> bool:
     active_bar_count = row["active_bar_count"]
+    if active_bar_count < 2:
+        return (
+            row["directional_close_ols_slope"] is None
+            and row["normalized_directional_close_ols_slope"] is None
+        )
+    if row["directional_close_ols_slope"] is None:
+        return False
     mean_candle_range = (
         row["gross_candle_range"] / active_bar_count
         if active_bar_count > 0
@@ -130,6 +147,8 @@ def _slope_normalization(row: Mapping[str, object]) -> bool:
         if mean_candle_range is not None and mean_candle_range > 0
         else None
     )
+    if row["normalized_directional_close_ols_slope"] is None:
+        return expected is None
     return _optional_float_equal(expected, row["normalized_directional_close_ols_slope"])
 
 

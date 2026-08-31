@@ -475,8 +475,8 @@ DETERMINISTIC_RELATION_CONDITIONS: dict[str, str] = {
     "SHADOW_MAGNITUDE_SUM": "always",
     "SHADOW_POSITION_IMBALANCE": "gross_shadow_magnitude > 0",
     "OVERLAP_RATIO": "gross_overlap_capacity > 0",
-    "SLOPE_DIRECTION": "direction_sign in {-1, +1}",
-    "SLOPE_NORMALIZATION": "active_bar_count > 0 and mean_candle_range > 0",
+    "SLOPE_DIRECTION": "active_bar_count < 2 requires Source-defined None slopes; otherwise direction_sign in {-1, +1}",
+    "SLOPE_NORMALIZATION": "active_bar_count < 2 requires Source-defined None slopes; otherwise active_bar_count > 0 and mean_candle_range > 0",
     "TICK_ACTIVITY_IDENTITY": "always",
 }
 
@@ -489,8 +489,8 @@ DETERMINISTIC_RELATION_UNDEFINED_WHEN: dict[str, str] = {
     "SHADOW_MAGNITUDE_SUM": "never",
     "SHADOW_POSITION_IMBALANCE": "gross_shadow_magnitude == 0",
     "OVERLAP_RATIO": "gross_overlap_capacity == 0",
-    "SLOPE_DIRECTION": "never (invalid direction_sign is an input error)",
-    "SLOPE_NORMALIZATION": "mean_candle_range is None or mean_candle_range <= 0",
+    "SLOPE_DIRECTION": "active_bar_count < 2 (Source-defined close_ols_slope and directional_close_ols_slope are None); otherwise never (invalid direction_sign is an input error)",
+    "SLOPE_NORMALIZATION": "active_bar_count < 2 (Source-defined directional_close_ols_slope and normalized_directional_close_ols_slope are None), or mean_candle_range is None or mean_candle_range <= 0",
     "TICK_ACTIVITY_IDENTITY": "never",
 }
 
