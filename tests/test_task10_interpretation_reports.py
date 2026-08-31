@@ -6,19 +6,29 @@ from pathlib import Path
 
 import pytest
 
-from research.combined_audit_contract import FEATURE_SPECS, MAIN_FEATURES, TIMEFRAMES
+from research.combined_audit_contract import (
+    DIRECTIONS,
+    FEATURE_SPECS,
+    MAIN_FEATURES,
+    RAW_DIRECTION_SENSITIVE,
+    TIMEFRAMES,
+)
 from research.task10_interpretation_contract import (
     CONTROL_FEATURE,
     CONTROL_NOT_APPLICABLE,
     MAIN_PAIR_KEYS,
     PARTIAL_PAIR_KEYS,
+    SUPPLEMENTARY_PAIR_KEYS,
     pair_key,
     validate_observation_text,
 )
 from research.task10_interpretation_io import Task9EvidenceBundle
 from research.task10_interpretation_reports import (
+    build_feature_dossiers,
+    build_future_ablation_hypotheses,
     build_main_relationship_dossiers,
     build_neutral_observations,
+    build_supplementary_evidence,
 )
 
 
@@ -102,12 +112,36 @@ def _bundle() -> Task9EvidenceBundle:
         }
         for timeframe in TIMEFRAMES
     )
+    supplementary_by_tf_direction = {}
+    for timeframe in TIMEFRAMES:
+        for direction in DIRECTIONS:
+            supplementary_by_tf_direction[(timeframe, direction)] = tuple(
+                {
+                    "feature_x": pair[0],
+                    "feature_y": pair[1],
+                    "n_total": 20,
+                    "n_valid_pairwise": 18,
+                    "n_missing_x": 1,
+                    "n_missing_y": 1,
+                    "rho_raw": 0.25,
+                    "raw_status": "DEFINED",
+                    "rho_raw_for_delta": None if CONTROL_FEATURE in pair else 0.2,
+                    "rho_duration_controlled": None if CONTROL_FEATURE in pair else 0.1,
+                    "delta_rho": None if CONTROL_FEATURE in pair else 0.1,
+                    "n_valid_triple": None if CONTROL_FEATURE in pair else 17,
+                    "controlled_status": (
+                        CONTROL_NOT_APPLICABLE if CONTROL_FEATURE in pair else "DEFINED"
+                    ),
+                    "evidence_scope": "SUPPLEMENTARY_ONLY",
+                }
+                for pair in SUPPLEMENTARY_PAIR_KEYS
+            )
     return Task9EvidenceBundle(
         feature_roles=roles,
         deterministic_rows=deterministic_rows,
         main_raw_by_tf=raw_by_tf,
         partial_by_tf=partial_by_tf,
-        supplementary_by_tf_direction={},
+        supplementary_by_tf_direction=supplementary_by_tf_direction,
         cross_tf=tuple(cross_tf),
         manifest={},
         evidence_zip_sha256="synthetic",
@@ -203,3 +237,69 @@ def test_task10_reports_do_not_recompute_task9_statistics():
     text = Path("research/task10_interpretation_reports.py").read_text("utf-8")
     assert "spearman_pairwise(" not in text
     assert "partial_spearman_duration(" not in text
+
+
+def test_build_supplementary_evidence_has_exact_960_row_boundary_and_traceability():
+    rows = build_supplementary_evidence(_bundle())
+
+    assert len(rows) == 960
+    assert rows[0] == {
+        "timeframe": "M5",
+        "direction": "BULLISH",
+        "source_artifact": "SUPPLEMENTARY_M5_BULLISH.csv",
+        "pair_key": pair_key(*SUPPLEMENTARY_PAIR_KEYS[0]),
+        "feature_x": SUPPLEMENTARY_PAIR_KEYS[0][0],
+        "feature_y": SUPPLEMENTARY_PAIR_KEYS[0][1],
+        "contains_raw_direction_sensitive": False,
+        "is_main_pair": True,
+        "n_total": 20,
+        "n_valid_pairwise": 18,
+        "n_missing_x": 1,
+        "n_missing_y": 1,
+        "rho_raw": 0.25,
+        "raw_status": "DEFINED",
+        "rho_raw_for_delta": None,
+        "rho_duration_controlled": None,
+        "delta_rho": None,
+        "n_valid_triple": None,
+        "controlled_status": CONTROL_NOT_APPLICABLE,
+        "evidence_scope": "SUPPLEMENTARY_ONLY",
+    }
+
+
+def test_raw_direction_sensitive_supplementary_rows_never_enter_main_scope():
+    rows = build_supplementary_evidence(_bundle())
+    sensitive = set(RAW_DIRECTION_SENSITIVE)
+    separated = [row for row in rows if {row["feature_x"], row["feature_y"]} & sensitive]
+
+    assert separated
+    assert all(row["contains_raw_direction_sensitive"] is True for row in separated)
+    assert all(row["is_main_pair"] is False for row in separated)
+    assert all(row["evidence_scope"] == "SUPPLEMENTARY_ONLY" for row in separated)
+
+
+def test_build_feature_dossiers_has_exact_13_features_and_12_main_pairs_each():
+    bundle = _bundle()
+    dossiers = build_feature_dossiers(bundle, build_main_relationship_dossiers(bundle))
+
+    assert [dossier["feature"] for dossier in dossiers] == list(MAIN_FEATURES)
+    assert len(dossiers) == 13
+    for dossier in dossiers:
+        role = FEATURE_SPECS[dossier["feature"]]
+        assert dossier == {
+            "feature": dossier["feature"],
+            "formula": role.formula,
+            "analysis_role": role.analysis_role,
+            "direction_semantics": role.direction_semantics,
+            "main_relationship_pair_keys": dossier["main_relationship_pair_keys"],
+            "future_ablation_hypothesis_ids": [],
+        }
+        assert len(dossier["main_relationship_pair_keys"]) == 12
+        assert all(
+            dossier["feature"] in pair.split("__")
+            for pair in dossier["main_relationship_pair_keys"]
+        )
+
+
+def test_automated_future_ablation_hypotheses_are_empty():
+    assert build_future_ablation_hypotheses() == []

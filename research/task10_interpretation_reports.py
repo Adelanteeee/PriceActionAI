@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 
-from research.combined_audit_contract import TIMEFRAMES
+from research.combined_audit_contract import (
+    DIRECTIONS,
+    MAIN_FEATURES,
+    RAW_DIRECTION_SENSITIVE,
+    TIMEFRAMES,
+)
 from research.task10_interpretation_contract import (
     CONTROL_FEATURE,
     CONTROL_NOT_APPLICABLE,
     MAIN_PAIR_KEYS,
     PARTIAL_PAIR_KEYS,
+    SUPPLEMENTARY_OUTPUT_FIELDS,
+    SUPPLEMENTARY_PAIR_KEYS,
     pair_key,
     validate_observation_text,
 )
@@ -255,4 +262,112 @@ def build_main_relationship_dossiers(bundle: Task9EvidenceBundle) -> list[dict[s
     return dossiers
 
 
-__all__ = ["build_main_relationship_dossiers", "build_neutral_observations"]
+def build_supplementary_evidence(
+    bundle: Task9EvidenceBundle,
+) -> list[dict[str, object]]:
+    """Copy the 960 locked direction-stratified Task 9 rows with provenance."""
+
+    expected_pairs = {pair_key(*pair) for pair in SUPPLEMENTARY_PAIR_KEYS}
+    main_pairs = {pair_key(*pair) for pair in MAIN_PAIR_KEYS}
+    sensitive_features = set(RAW_DIRECTION_SENSITIVE)
+    output: list[dict[str, object]] = []
+    source_fields = SUPPLEMENTARY_OUTPUT_FIELDS[8:]
+    for timeframe in TIMEFRAMES:
+        for direction in DIRECTIONS:
+            source_artifact = f"SUPPLEMENTARY_{timeframe}_{direction}.csv"
+            try:
+                source_rows = bundle.supplementary_by_tf_direction[
+                    (timeframe, direction)
+                ]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Task 9 supplementary source is missing {source_artifact}"
+                ) from exc
+            indexed = _pair_index(source_rows, source=source_artifact)
+            if set(indexed) != expected_pairs:
+                raise ValueError(
+                    f"Task 9 supplementary pair set is inconsistent for {source_artifact}"
+                )
+            for feature_x, feature_y in SUPPLEMENTARY_PAIR_KEYS:
+                source_pair_key = pair_key(feature_x, feature_y)
+                source = indexed[source_pair_key]
+                if any(field not in source for field in source_fields):
+                    raise ValueError(
+                        f"Task 9 supplementary row is incomplete for "
+                        f"{source_artifact}#{source_pair_key}"
+                    )
+                contains_sensitive = bool(
+                    {feature_x, feature_y} & sensitive_features
+                )
+                is_main_pair = source_pair_key in main_pairs
+                if contains_sensitive and is_main_pair:
+                    raise ValueError("raw-direction-sensitive pair entered main scope")
+                output.append(
+                    {
+                        "timeframe": timeframe,
+                        "direction": direction,
+                        "source_artifact": source_artifact,
+                        "pair_key": source_pair_key,
+                        "feature_x": feature_x,
+                        "feature_y": feature_y,
+                        "contains_raw_direction_sensitive": contains_sensitive,
+                        "is_main_pair": is_main_pair,
+                        **{field: source[field] for field in source_fields},
+                    }
+                )
+    return output
+
+
+def build_feature_dossiers(
+    bundle: Task9EvidenceBundle,
+    main_dossiers: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Build one metadata-only dossier for each locked main feature."""
+
+    roles = _feature_roles(bundle)
+    pair_keys_by_feature = {feature: [] for feature in MAIN_FEATURES}
+    seen_pairs: set[str] = set()
+    for dossier in main_dossiers:
+        try:
+            feature_x = str(dossier["feature_x"])
+            feature_y = str(dossier["feature_y"])
+            source_pair_key = str(dossier["pair_key"])
+        except KeyError as exc:
+            raise ValueError("main dossier is missing pair metadata") from exc
+        if source_pair_key != pair_key(feature_x, feature_y):
+            raise ValueError("main dossier pair key is inconsistent")
+        if source_pair_key in seen_pairs:
+            raise ValueError(f"duplicate main dossier pair {source_pair_key}")
+        seen_pairs.add(source_pair_key)
+        pair_keys_by_feature[feature_x].append(source_pair_key)
+        pair_keys_by_feature[feature_y].append(source_pair_key)
+    expected_pairs = {pair_key(*pair) for pair in MAIN_PAIR_KEYS}
+    if seen_pairs != expected_pairs:
+        raise ValueError("main dossiers do not contain the locked 78-pair set")
+
+    return [
+        {
+            "feature": feature,
+            "formula": roles[feature]["formula"],
+            "analysis_role": roles[feature]["analysis_role"],
+            "direction_semantics": roles[feature]["direction_semantics"],
+            "main_relationship_pair_keys": pair_keys_by_feature[feature],
+            "future_ablation_hypothesis_ids": [],
+        }
+        for feature in MAIN_FEATURES
+    ]
+
+
+def build_future_ablation_hypotheses() -> list[dict[str, object]]:
+    """Return the locked empty artifact; Task 10 invents no hypotheses."""
+
+    return []
+
+
+__all__ = [
+    "build_feature_dossiers",
+    "build_future_ablation_hypotheses",
+    "build_main_relationship_dossiers",
+    "build_neutral_observations",
+    "build_supplementary_evidence",
+]
