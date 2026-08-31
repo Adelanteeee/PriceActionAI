@@ -1,4 +1,4 @@
-"""Deterministic, non-statistical audit reports for locked Leg identities."""
+"""Deterministic and statistical reports for the locked Combined Leg audit."""
 
 import math
 from collections.abc import Callable, Mapping, Sequence
@@ -42,6 +42,8 @@ def _optional_float_equal(expected: object, observed: object) -> bool:
 
 
 def _close_displacement_abs(row: Mapping[str, object]) -> bool:
+    if row["direction"] not in {"BULLISH", "BEARISH"}:
+        return False
     return _float_equal(abs(row["signed_close_displacement"]), row["net_close_displacement"])
 
 
@@ -184,7 +186,9 @@ def build_deterministic_identity_report(
         report.append(
             {
                 "relation_id": relation_id,
+                "relation_type": metadata["relation_type"],
                 "formula": metadata["formula"],
+                "participating_features": metadata["participating_features"],
                 "condition": metadata["condition"],
                 "undefined_when": metadata["undefined_when"],
                 "undefined_result": metadata["undefined_result"],

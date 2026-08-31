@@ -97,8 +97,15 @@ def test_registry_covers_main_raw_and_traceability_fields():
 def test_main_and_raw_eligibility_are_explicit():
     assert all(FEATURE_SPECS[name].pairwise_eligible for name in MAIN_FEATURES)
     assert all(FEATURE_SPECS[name].controlled_eligible for name in MAIN_FEATURES if name != "active_bar_count")
+    assert all(FEATURE_SPECS[name].stratified_audit_eligible for name in MAIN_FEATURES)
     assert all(FEATURE_SPECS[name].stratified_audit_eligible for name in RAW_DIRECTION_SENSITIVE)
     assert all(not FEATURE_SPECS[name].pairwise_eligible for name in RAW_DIRECTION_SENSITIVE)
+    supplementary = set(MAIN_FEATURES) | set(RAW_DIRECTION_SENSITIVE)
+    assert all(
+        not spec.stratified_audit_eligible
+        for name, spec in FEATURE_SPECS.items()
+        if name not in supplementary
+    )
 
 
 def test_shadow_formula_and_deterministic_relation_ids_are_locked():
@@ -153,6 +160,31 @@ def test_none_branches_are_explicit_in_deterministic_registry():
         metadata = DETERMINISTIC_REGISTRY[relation_id]
         assert metadata["undefined_when"] == undefined_when
         assert metadata["undefined_result"] == "None (valid undefined value)"
+
+
+def test_deterministic_registry_has_locked_machine_readable_metadata():
+    expected_participants = {
+        "CLOSE_DISPLACEMENT_ABS": '["direction","signed_close_displacement","net_close_displacement"]',
+        "CONTINUITY_COUNT_SUM": '["aligned_close_steps","opposing_close_steps","flat_close_steps","active_bar_count"]',
+        "CONTINUITY_RATIO": '["aligned_close_steps","active_bar_count","directional_continuity_ratio"]',
+        "BODY_STRENGTH_RATIO": '["gross_body_magnitude","gross_candle_range","body_strength_ratio"]',
+        "GAP_PATH_SHARE": '["gap_path_contribution","gross_close_path","gap_path_share"]',
+        "SHADOW_MAGNITUDE_SUM": '["gross_forward_shadow","gross_backward_shadow","gross_shadow_magnitude"]',
+        "SHADOW_POSITION_IMBALANCE": '["gross_forward_shadow","gross_backward_shadow","gross_shadow_magnitude","shadow_position_imbalance"]',
+        "OVERLAP_RATIO": '["gross_overlap_magnitude","gross_overlap_capacity","overlap_ratio"]',
+        "SLOPE_DIRECTION": '["direction","close_ols_slope","directional_close_ols_slope"]',
+        "SLOPE_NORMALIZATION": '["active_bar_count","gross_candle_range","directional_close_ols_slope","normalized_directional_close_ols_slope"]',
+        "TICK_ACTIVITY_IDENTITY": '["mean_tick_activity","active_bar_count","gross_tick_activity"]',
+    }
+    assert {
+        relation_id: metadata["participating_features"]
+        for relation_id, metadata in DETERMINISTIC_REGISTRY.items()
+    } == expected_participants
+    assert all(
+        metadata["relation_type"] == "DETERMINISTIC"
+        for metadata in DETERMINISTIC_REGISTRY.values()
+    )
+    assert DETERMINISTIC_REGISTRY["TICK_ACTIVITY_IDENTITY"]["condition"] == "always"
 
 
 def test_feature_role_rows_are_csv_ready_and_do_not_alias_registry():

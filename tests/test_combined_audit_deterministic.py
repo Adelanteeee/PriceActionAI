@@ -207,7 +207,28 @@ def test_missing_columns_fail_the_unrelated_identity_instead_of_skipping():
 def test_report_reuses_locked_registry_metadata(full_identity_rows):
     row = build_deterministic_identity_report(full_identity_rows)[0]
     assert row["relation_id"] == "CLOSE_DISPLACEMENT_ABS"
+    assert row["relation_type"] == "DETERMINISTIC"
+    assert row["participating_features"] == (
+        '["direction","signed_close_displacement","net_close_displacement"]'
+    )
     assert row["formula"] == "net_close_displacement = abs(signed_close_displacement)"
     assert row["condition"] == "direction_sign in {-1, +1}"
     assert "rel_tol=1e-12" in row["tolerance_policy"]
     assert "None=exact" in row["tolerance_policy"]
+
+
+def test_invalid_direction_fails_both_direction_conditioned_identities():
+    row = {
+        "direction": "SIDEWAYS",
+        "signed_close_displacement": -4.0,
+        "net_close_displacement": 4.0,
+        "close_ols_slope": -2.0,
+        "directional_close_ols_slope": 2.0,
+    }
+
+    result = _by_id(build_deterministic_identity_report([row]))
+
+    for relation_id in ("CLOSE_DISPLACEMENT_ABS", "SLOPE_DIRECTION"):
+        assert result[relation_id]["total_rows"] == 1
+        assert result[relation_id]["verified_rows"] == 0
+        assert result[relation_id]["failed_rows"] == 1

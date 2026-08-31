@@ -40,7 +40,9 @@ COMBINED_MANIFEST_FILENAME = "COMBINED_AUDIT_MANIFEST.json"
 DETERMINISTIC_FIELDS = (
     "timeframe",
     "relation_id",
+    "relation_type",
     "formula",
+    "participating_features",
     "conditions",
     "tolerance_policy",
     "total_rows",
@@ -409,6 +411,12 @@ def _parse_rows(tf: str, raw_rows: Sequence[Mapping[str, object]]) -> tuple[Mapp
                         f"{tf}: data row {data_row}, column {column!r}, "
                         f"raw value {raw_value!r}: missing string cell"
                     )
+                if column == "direction" and raw_value not in DIRECTIONS:
+                    raise ValueError(
+                        f"{tf}: data row {data_row}, column {column!r}, "
+                        f"raw value {raw_value!r}: expected exact "
+                        "'BULLISH' or 'BEARISH'"
+                    )
                 parsed[column] = raw_value
             else:
                 parsed[column] = _parse_numeric(
@@ -550,7 +558,9 @@ def _combined_deterministic_rows(
                 {
                     "timeframe": tf,
                     "relation_id": row["relation_id"],
+                    "relation_type": row["relation_type"],
                     "formula": row["formula"],
+                    "participating_features": row["participating_features"],
                     "conditions": (
                         f"condition={row['condition']}; "
                         f"undefined_when={row['undefined_when']}; "

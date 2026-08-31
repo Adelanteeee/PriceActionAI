@@ -353,6 +353,24 @@ def test_loader_maps_whitespace_only_numeric_cell_to_none(tmp_path):
     assert bundle.rows_by_tf["M5"][0]["overlap_ratio"] is None
 
 
+@pytest.mark.parametrize("bad_direction", ["", "bullish", " BULLISH", "BEARISH ", "SIDEWAYS"])
+def test_loader_rejects_direction_that_could_disappear_from_both_strata(
+    tmp_path, bad_direction
+):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        cell_override=("M15", 2, "direction", bad_direction),
+    )
+
+    with pytest.raises(ValueError) as exc:
+        load_locked_activity_package(package)
+
+    assert str(exc.value) == (
+        "M15: data row 2, column 'direction', "
+        f"raw value {bad_direction!r}: expected exact 'BULLISH' or 'BEARISH'"
+    )
+
+
 def test_loader_records_input_and_snapshot_hashes(tmp_path):
     package = make_synthetic_activity_zip(tmp_path)
 

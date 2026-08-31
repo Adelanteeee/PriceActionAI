@@ -64,7 +64,7 @@ def _main(
         analysis_role="ANALYSIS_FEATURE",
         pairwise_eligible=True,
         controlled_eligible=controlled_eligible,
-        stratified_audit_eligible=False,
+        stratified_audit_eligible=True,
     )
 
 
@@ -452,6 +452,20 @@ DETERMINISTIC_RELATION_FORMULAS: dict[str, str] = {
     "TICK_ACTIVITY_IDENTITY": "gross_tick_activity = mean_tick_activity * active_bar_count",
 }
 
+DETERMINISTIC_RELATION_PARTICIPATING_FEATURES: dict[str, str] = {
+    "CLOSE_DISPLACEMENT_ABS": '["direction","signed_close_displacement","net_close_displacement"]',
+    "CONTINUITY_COUNT_SUM": '["aligned_close_steps","opposing_close_steps","flat_close_steps","active_bar_count"]',
+    "CONTINUITY_RATIO": '["aligned_close_steps","active_bar_count","directional_continuity_ratio"]',
+    "BODY_STRENGTH_RATIO": '["gross_body_magnitude","gross_candle_range","body_strength_ratio"]',
+    "GAP_PATH_SHARE": '["gap_path_contribution","gross_close_path","gap_path_share"]',
+    "SHADOW_MAGNITUDE_SUM": '["gross_forward_shadow","gross_backward_shadow","gross_shadow_magnitude"]',
+    "SHADOW_POSITION_IMBALANCE": '["gross_forward_shadow","gross_backward_shadow","gross_shadow_magnitude","shadow_position_imbalance"]',
+    "OVERLAP_RATIO": '["gross_overlap_magnitude","gross_overlap_capacity","overlap_ratio"]',
+    "SLOPE_DIRECTION": '["direction","close_ols_slope","directional_close_ols_slope"]',
+    "SLOPE_NORMALIZATION": '["active_bar_count","gross_candle_range","directional_close_ols_slope","normalized_directional_close_ols_slope"]',
+    "TICK_ACTIVITY_IDENTITY": '["mean_tick_activity","active_bar_count","gross_tick_activity"]',
+}
+
 DETERMINISTIC_RELATION_CONDITIONS: dict[str, str] = {
     "CLOSE_DISPLACEMENT_ABS": "direction_sign in {-1, +1}",
     "CONTINUITY_COUNT_SUM": "always",
@@ -463,7 +477,7 @@ DETERMINISTIC_RELATION_CONDITIONS: dict[str, str] = {
     "OVERLAP_RATIO": "gross_overlap_capacity > 0",
     "SLOPE_DIRECTION": "direction_sign in {-1, +1}",
     "SLOPE_NORMALIZATION": "active_bar_count > 0 and mean_candle_range > 0",
-    "TICK_ACTIVITY_IDENTITY": "active_bar_count > 0",
+    "TICK_ACTIVITY_IDENTITY": "always",
 }
 
 DETERMINISTIC_RELATION_UNDEFINED_WHEN: dict[str, str] = {
@@ -485,7 +499,9 @@ DETERMINISTIC_RELATION_UNDEFINED_WHEN: dict[str, str] = {
 DETERMINISTIC_REGISTRY: dict[str, dict[str, str]] = {
     relation: {
         "relation": relation,
+        "relation_type": "DETERMINISTIC",
         "formula": DETERMINISTIC_RELATION_FORMULAS[relation],
+        "participating_features": DETERMINISTIC_RELATION_PARTICIPATING_FEATURES[relation],
         "condition": DETERMINISTIC_RELATION_CONDITIONS[relation],
         "undefined_when": DETERMINISTIC_RELATION_UNDEFINED_WHEN[relation],
         "undefined_result": (
@@ -513,6 +529,7 @@ __all__ = [
     "DETERMINISTIC_RELATIONS",
     "DETERMINISTIC_RELATION_CONDITIONS",
     "DETERMINISTIC_RELATION_FORMULAS",
+    "DETERMINISTIC_RELATION_PARTICIPATING_FEATURES",
     "DETERMINISTIC_RELATION_UNDEFINED_WHEN",
     "DETERMINISTIC_REGISTRY",
     "DIRECTIONS",

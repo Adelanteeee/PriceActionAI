@@ -210,7 +210,9 @@ def test_end_to_end_synthetic_package_writes_all_required_artifacts(tmp_path):
     assert tuple(deterministic[0]) == (
         "timeframe",
         "relation_id",
+        "relation_type",
         "formula",
+        "participating_features",
         "conditions",
         "tolerance_policy",
         "total_rows",
@@ -218,6 +220,15 @@ def test_end_to_end_synthetic_package_writes_all_required_artifacts(tmp_path):
         "failed_rows",
     )
     assert [row["timeframe"] for row in deterministic[::11]] == list(TIMEFRAMES)
+    assert all(row["relation_type"] == "DETERMINISTIC" for row in deterministic)
+    assert all(
+        isinstance(json.loads(row["participating_features"]), list)
+        and json.loads(row["participating_features"])
+        for row in deterministic
+    )
+    assert deterministic[0]["participating_features"] == (
+        '["direction","signed_close_displacement","net_close_displacement"]'
+    )
     assert all(
         int(row["verified_rows"]) + int(row["failed_rows"])
         == int(row["total_rows"])
