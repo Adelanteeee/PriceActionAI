@@ -60,9 +60,9 @@ def full_identity_rows():
             "gross_overlap_magnitude": 0.0,
             "gross_overlap_capacity": 0.0,
             "overlap_ratio": None,
-            "close_ols_slope": 0.0,
+            "close_ols_slope": None,
             "direction": "BULLISH",
-            "directional_close_ols_slope": 0.0,
+            "directional_close_ols_slope": None,
             "normalized_directional_close_ols_slope": None,
             "gross_tick_activity": 0,
             "mean_tick_activity": 0.0,
@@ -158,6 +158,48 @@ def test_slope_normalization_matches_source_defined_chain():
     assert result["SLOPE_NORMALIZATION"]["failed_rows"] == 0
 
 
+def test_one_bar_leg_with_source_defined_none_slope_fields_is_verified():
+    row = {
+        "active_bar_count": 1,
+        "gross_candle_range": 20.0,
+        "close_ols_slope": None,
+        "direction": "BULLISH",
+        "directional_close_ols_slope": None,
+        "normalized_directional_close_ols_slope": None,
+    }
+
+    result = _by_id(build_deterministic_identity_report([row]))
+
+    for relation_id in ("SLOPE_DIRECTION", "SLOPE_NORMALIZATION"):
+        assert result[relation_id]["verified_rows"] == 1
+        assert result[relation_id]["failed_rows"] == 0
+
+
+@pytest.mark.parametrize(
+    ("replacement", "failed_relations"),
+    [
+        ({"directional_close_ols_slope": 0.0}, ("SLOPE_DIRECTION", "SLOPE_NORMALIZATION")),
+        ({"normalized_directional_close_ols_slope": 0.0}, ("SLOPE_NORMALIZATION",)),
+    ],
+)
+def test_one_bar_leg_rejects_mixed_none_slope_fields(replacement, failed_relations):
+    row = {
+        "active_bar_count": 1,
+        "gross_candle_range": 20.0,
+        "close_ols_slope": None,
+        "direction": "BULLISH",
+        "directional_close_ols_slope": None,
+        "normalized_directional_close_ols_slope": None,
+        **replacement,
+    }
+
+    result = _by_id(build_deterministic_identity_report([row]))
+
+    for relation_id in failed_relations:
+        assert result[relation_id]["verified_rows"] == 0
+        assert result[relation_id]["failed_rows"] == 1
+
+
 def test_tick_activity_identity_uses_locked_float_tolerance():
     rows = [{
         "gross_tick_activity": 3001,
@@ -175,7 +217,7 @@ def test_tick_activity_identity_uses_locked_float_tolerance():
         ("BODY_STRENGTH_RATIO", {"gross_candle_range": 0.0, "gross_body_magnitude": 0.0, "body_strength_ratio": None}),
         ("GAP_PATH_SHARE", {"gross_close_path": 0.0, "gap_path_contribution": 0.0, "gap_path_share": None}),
         ("OVERLAP_RATIO", {"gross_overlap_capacity": 0.0, "gross_overlap_magnitude": 0.0, "overlap_ratio": None}),
-        ("SLOPE_NORMALIZATION", {"active_bar_count": 0, "gross_candle_range": 0.0, "directional_close_ols_slope": 0.0, "normalized_directional_close_ols_slope": None}),
+        ("SLOPE_NORMALIZATION", {"active_bar_count": 2, "gross_candle_range": 0.0, "directional_close_ols_slope": 0.0, "normalized_directional_close_ols_slope": None}),
     ],
 )
 def test_zero_denominator_ratio_identities_require_none(relation_id, row):
