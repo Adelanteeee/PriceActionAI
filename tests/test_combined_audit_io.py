@@ -135,6 +135,7 @@ def make_synthetic_activity_zip(
     tmp_path,
     *,
     status="FINAL LOCK / PASS",
+    manifest_member="manifest.json",
     drop_columns_by_tf=None,
     cell_override=None,
     csv_names=None,
@@ -172,7 +173,7 @@ def make_synthetic_activity_zip(
     if mutate_manifest is not None:
         mutate_manifest(manifest)
 
-    members = {"manifest.json": json.dumps(manifest).encode()}
+    members = {manifest_member: json.dumps(manifest).encode()}
     for tf in TIMEFRAMES:
         overrides = []
         if cell_override is not None and cell_override[0] == tf:
@@ -203,6 +204,27 @@ def test_loader_requires_final_lock_status(tmp_path):
     package = make_synthetic_activity_zip(tmp_path, status="LOCK CANDIDATE")
 
     with pytest.raises(ValueError, match="FINAL LOCK / PASS"):
+        load_locked_activity_package(package)
+
+
+def test_loader_accepts_canonical_locked_manifest_member(tmp_path):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        manifest_member="GOLD_ACTIVITY_AUDIT_MANIFEST.json",
+    )
+
+    bundle = load_locked_activity_package(package)
+
+    assert tuple(bundle.rows_by_tf) == TIMEFRAMES
+
+
+def test_loader_rejects_both_accepted_manifest_members(tmp_path):
+    package = make_synthetic_activity_zip(
+        tmp_path,
+        extra_members={"GOLD_ACTIVITY_AUDIT_MANIFEST.json": b"{}"},
+    )
+
+    with pytest.raises(ValueError, match="multiple accepted manifest members"):
         load_locked_activity_package(package)
 
 

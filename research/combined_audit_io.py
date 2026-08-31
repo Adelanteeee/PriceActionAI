@@ -30,7 +30,10 @@ from research.combined_audit_contract import (
 
 
 FINAL_LOCK_STATUS = "FINAL LOCK / PASS"
-MANIFEST_MEMBER = "manifest.json"
+MANIFEST_MEMBERS = (
+    "GOLD_ACTIVITY_AUDIT_MANIFEST.json",
+    "manifest.json",
+)
 
 FEATURE_ROLE_FILENAME = "FEATURE_ROLE_MATRIX.csv"
 DETERMINISTIC_FILENAME = "DETERMINISTIC_IDENTITY_REPORT.csv"
@@ -252,22 +255,27 @@ def _read_unique_member(
 
 
 def _load_manifest(archive: zipfile.ZipFile, counts: Mapping[str, int]) -> dict[str, Any]:
-    count = counts.get(MANIFEST_MEMBER, 0)
-    if count == 0:
-        raise ValueError(f"package is missing required {MANIFEST_MEMBER} manifest")
-    if count > 1:
-        raise ValueError(f"package contains duplicate {MANIFEST_MEMBER} members")
-    raw = archive.read(MANIFEST_MEMBER)
+    present = [name for name in MANIFEST_MEMBERS if counts.get(name, 0)]
+    if not present:
+        raise ValueError(
+            f"package is missing required {' or '.join(MANIFEST_MEMBERS)} manifest"
+        )
+    if len(present) > 1:
+        raise ValueError("package contains multiple accepted manifest members")
+    manifest_member = present[0]
+    if counts[manifest_member] > 1:
+        raise ValueError(f"package contains duplicate {manifest_member} members")
+    raw = archive.read(manifest_member)
     try:
         manifest = json.loads(
             raw.decode("utf-8"),
             object_pairs_hook=_reject_duplicate_json_keys,
         )
     except _DuplicateJSONKey as exc:
-        raise ValueError(f"{MANIFEST_MEMBER}: {exc}") from exc
+        raise ValueError(f"{manifest_member}: {exc}") from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{MANIFEST_MEMBER} must contain valid JSON: {exc}") from exc
-    return _require_mapping(manifest, MANIFEST_MEMBER)
+        raise ValueError(f"{manifest_member} must contain valid JSON: {exc}") from exc
+    return _require_mapping(manifest, manifest_member)
 
 
 def _validate_manifest(manifest: dict[str, Any]) -> dict[str, dict[str, str]]:
