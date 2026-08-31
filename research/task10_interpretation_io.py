@@ -38,9 +38,16 @@ from research.combined_audit_io import (
     FEATURE_ROLE_FILENAME,
 )
 from research.task10_interpretation_contract import (
+    FEATURE_DOSSIERS_FILENAME,
+    HYPOTHESES_FILENAME,
+    MAIN_DOSSIERS_FILENAME,
     MAIN_PAIR_KEYS,
+    MANIFEST_FILENAME,
     PARTIAL_PAIR_KEYS,
+    SUPPLEMENTARY_FILENAME,
+    SUPPLEMENTARY_OUTPUT_FIELDS,
     SUPPLEMENTARY_PAIR_KEYS,
+    TASK10_LOGICAL_FILENAMES,
     TASK9_ACTIVITY_INPUT_SHA256,
     TASK9_AUDIT_CODE_COMMIT,
     TASK9_EVIDENCE_SHA256,
@@ -51,6 +58,7 @@ _FINITE_DECIMAL_RE = re.compile(
     r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z"
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_SHA1_RE = re.compile(r"[0-9a-f]{40}\Z")
 
 _EXPECTED_MEMBERS = frozenset(
     {
@@ -420,4 +428,114 @@ def load_task9_evidence_package(path: Path) -> Task9EvidenceBundle:
     return _load_task9_evidence_bytes(package_bytes, expected_sha256=TASK9_EVIDENCE_SHA256)
 
 
-__all__ = ["Task9EvidenceBundle", "load_task9_evidence_package"]
+def _json_bytes(value: object) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _supplementary_csv_bytes(rows: Sequence[Mapping[str, object]]) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=SUPPLEMENTARY_OUTPUT_FIELDS,
+        extrasaction="raise",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
+
+
+def _write_deterministic_zip(path: Path, members: Mapping[str, bytes]) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(
+        destination,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    ) as archive:
+        for name in sorted(members):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(
+                info,
+                members[name],
+                compress_type=zipfile.ZIP_DEFLATED,
+                compresslevel=9,
+            )
+
+
+def write_task10_outputs(
+    output_dir: Path,
+    *,
+    implementation_commit: str,
+    main_dossiers: Sequence[Mapping[str, object]],
+    supplementary_evidence: Sequence[Mapping[str, object]],
+    feature_dossiers: Sequence[Mapping[str, object]],
+    future_ablation_hypotheses: Sequence[Mapping[str, object]],
+    manifest: Mapping[str, object],
+    output_zip: Path | None = None,
+) -> None:
+    """Write the five locked Task 10 artifacts and optional deterministic ZIP."""
+
+    if _SHA1_RE.fullmatch(implementation_commit) is None:
+        raise ValueError("implementation_commit must be a lowercase 40-character SHA")
+    locked_manifest_values = {
+        "task10_implementation_commit": implementation_commit,
+        "main_relationship_dossier_count": 78,
+        "partial_delta_eligible_pair_count": 66,
+        "control_feature_non_applicable_pair_count": 12,
+        "feature_dossier_count": 13,
+        "supplementary_evidence_row_count": 960,
+        "future_ablation_hypothesis_count": 0,
+        "raw_cross_tf_pooling": False,
+        "new_association_statistics_computed": False,
+        "ranking_performed": False,
+        "cutoff_applied": False,
+        "threshold_applied": False,
+        "score_computed": False,
+        "outcome_used": False,
+        "ablation_executed": False,
+        "causal_replay_executed": False,
+        "feature_removal_recommended": False,
+    }
+    drift = {
+        field: (expected, manifest.get(field))
+        for field, expected in locked_manifest_values.items()
+        if manifest.get(field) != expected
+        or type(manifest.get(field)) is not type(expected)
+    }
+    if drift:
+        raise ValueError(f"Task 10 manifest provenance/count/scope drift: {drift}")
+    members = {
+        MAIN_DOSSIERS_FILENAME: _json_bytes(main_dossiers),
+        SUPPLEMENTARY_FILENAME: _supplementary_csv_bytes(supplementary_evidence),
+        FEATURE_DOSSIERS_FILENAME: _json_bytes(feature_dossiers),
+        HYPOTHESES_FILENAME: _json_bytes(future_ablation_hypotheses),
+        MANIFEST_FILENAME: _json_bytes(manifest),
+    }
+    if tuple(members) != TASK10_LOGICAL_FILENAMES:
+        raise RuntimeError("Task 10 logical output set/order drifted")
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    for name, data in members.items():
+        (destination / name).write_bytes(data)
+    if output_zip is not None:
+        _write_deterministic_zip(output_zip, members)
+
+
+__all__ = [
+    "Task9EvidenceBundle",
+    "load_task9_evidence_package",
+]
