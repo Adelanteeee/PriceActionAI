@@ -6,7 +6,7 @@
 
 **Architecture:** Task 11 has four focused units: a frozen machine-readable contract, a strict Task 10 package loader plus deterministic writer, a pure Hypothesis registry builder, and a provenance-gated production runner/CLI. The public loader accepts only the canonical Task 10 package SHA; synthetic tests use a private byte seam. The builder copies JSON values from each canonical Main Relationship Dossier, while the runner computes only serialization hashes and locked counts needed for provenance.
 
-**Tech Stack:** Python 3.12, pytest, and Python standard library only (`argparse`, `ast`, `copy`, `csv`, `dataclasses`, `hashlib`, `io`, `itertools`, `json`, `math`, `pathlib`, `re`, `subprocess`, `zipfile`, `collections`, `collections.abc`, `types`, `typing`). No new package dependency and no import from `src/`.
+**Tech Stack:** Python 3.12, pytest, and Python standard library only (`argparse`, `ast`, `copy`, `csv`, `dataclasses`, `hashlib`, `io`, `json`, `math`, `pathlib`, `re`, `subprocess`, `zipfile`, `collections`, `collections.abc`, `types`, `typing`). No new package dependency and no import from `src/`.
 
 **Spec:** `docs/superpowers/specs/2026-09-01-task11-evidence-review-hypothesis-registration-design.md`
 
@@ -16,13 +16,14 @@
 
 **Spec Lock Record:** `docs/superpowers/specs/2026-09-01-task11-evidence-review-hypothesis-registration-design.LOCKED.md`
 
-**Spec Lock Record Commit / Plan Base HEAD:** `a51dc7f76a5c3ea4c8e2929be7859c02c879a2d9`
+**Spec Lock Record Commit / Required Plan Ancestor:** `a51dc7f76a5c3ea4c8e2929be7859c02c879a2d9`
 
 ## Global Constraints
 
 - `HYPOTHESIS_UNIT = "PAIRWISE_ONLY"`.
 - `HYPOTHESIS_CARDINALITY = "EXACTLY_ONE_PER_CANONICAL_PAIR"`.
 - The input sequence is exactly 78 canonical Task 10 Main Relationship Dossiers and the output sequence is exactly 78 Hypothesis records in the same index order.
+- `TIMEFRAMES` and the ordered 78-value `TASK10_CANONICAL_PAIR_KEYS` tuple are frozen literal Task 11 contract data copied from the canonical locked Task 10 Main Dossier array; production code must not derive either value from repository code, Feature metadata, sorting, combinations, or Feature-name reconstruction.
 - Each output record contains exactly one source `pair_key`, exactly two distinct canonical Main Features, and no cross-pair or multi-feature content.
 - `hypothesis_id = "TASK11_HYPOTHESIS__" + pair_key`; no normalization, reordering, hashing, abbreviation, numbering, timestamp, UUID, or manual ID is permitted.
 - `TEST_QUESTION_POLICY = "SINGLE_FIXED_TEMPLATE"` and `TEST_QUESTION_TEMPLATE_ID = "TASK11_PAIRWISE_NEUTRAL_V1"`.
@@ -37,7 +38,7 @@
 - Task 11 computes no new association statistic or other statistic. SHA-256 digests and exact locked counts are provenance/validation operations, not research statistics.
 - No rank, score, weight, priority, strength/stability/redundancy label, Keep/Drop recommendation, outcome, prediction, threshold, Ablation result, causal interpretation, Feature Importance, Feature Selection, Feature Removal, Optimization, raw cross-TF pooling, directional removal test, horizon, or Causal Replay implementation is permitted.
 - The only logical output filenames are `TASK11_HYPOTHESIS_REGISTRY.json` and `TASK11_MANIFEST.json`.
-- The required production archive is `TASK11_EVIDENCE_REVIEW_HYPOTHESIS_REGISTRATION_PACKAGE.zip` and contains exactly those two logical files.
+- The required production archive is `TASK11_EVIDENCE_REVIEW_HYPOTHESIS_REGISTRATION_PACKAGE.zip` and contains exactly those two logical files. Every production ZIP path must have that exact basename; any other basename fails before output creation.
 - Locked counts are `78 / 78 / 66 / 12 / 4 / 2` for main pairs, Hypotheses, Duration-control eligible pairs, control-feature non-applicable pairs, deterministic-context pairs, and logical files.
 - JSON is UTF-8, sorted-key, compact (`separators=(",", ":")`), `allow_nan=False`, and ends with exactly one newline.
 - ZIP members are sorted by filename, use timestamp `(1980, 1, 1, 0, 0, 0)`, deflate level 9, Unix regular-file mode `0o100644`, and no extra metadata.
@@ -79,12 +80,14 @@ At the beginning of a future authorized implementation session, verify that the 
 ```bash
 TASK11_EXECUTION_BASELINE="$(git log -1 --format=%H -- docs/superpowers/plans/2026-09-01-task11-evidence-review-hypothesis-registration.md)"
 test "$(git rev-parse HEAD)" = "$TASK11_EXECUTION_BASELINE"
-test "$(git rev-parse "$TASK11_EXECUTION_BASELINE^")" = "a51dc7f76a5c3ea4c8e2929be7859c02c879a2d9"
+git merge-base --is-ancestor a51dc7f76a5c3ea4c8e2929be7859c02c879a2d9 "$TASK11_EXECUTION_BASELINE"
+test "$(git rev-parse "$TASK11_EXECUTION_BASELINE:docs/superpowers/specs/2026-09-01-task11-evidence-review-hypothesis-registration-design.md")" = "99e93ef6ca7cf1038561e7d6c4217e226ba99dfb"
+test "$(git rev-parse "$TASK11_EXECUTION_BASELINE:docs/superpowers/specs/2026-09-01-task11-evidence-review-hypothesis-registration-design.LOCKED.md")" = "de87a930b424b0cf9e58e14c8b27dca336954f33"
 git status --porcelain=v1 --untracked-files=no
 git diff --cached --quiet
 ```
 
-Expected: both `test` commands and `git diff --cached --quiet` exit 0; tracked-status output is empty. Install the repository's test dependencies if the execution environment does not already provide them:
+Expected: the HEAD equality check, Spec Lock ancestry check, both blob checks, and `git diff --cached --quiet` exit 0; tracked-status output is empty. The latest Plan commit may have one or more Plan-review commits after the Spec Lock commit, so no direct-parent equality is required. Install the repository's test dependencies if the execution environment does not already provide them:
 
 ```bash
 python -m pip install --upgrade pytest pandas plotly
@@ -117,6 +120,7 @@ Create exactly these implementation/test files; modify no existing source, test,
 - Public `load_task10_production_package(path: Path) -> Task10ProductionBundle`.
 - Private `_load_task10_production_bytes(package_bytes: bytes, *, expected_package_sha256: str, expected_member_sha256_by_filename: Mapping[str, str]) -> Task10ProductionBundle`.
 - Private `_json_bytes(value: object) -> bytes`.
+- Private `_validate_output_zip_path(output_zip: Path) -> Path`, which returns the normalized `Path` only when `output_zip.name == OUTPUT_ZIP_FILENAME` and otherwise raises before any output creation.
 - `write_task11_outputs(output_dir: Path, *, implementation_commit: str, registry: Sequence[Mapping[str, object]], manifest: Mapping[str, object], output_zip: Path) -> None`.
 
 `research.task11_hypothesis_registry` exposes only:
@@ -144,7 +148,7 @@ The private loader/orchestration seams are importable for pytest only and are ne
 - Create: `tests/test_task11_hypothesis_contract.py`
 
 **Interfaces:**
-- Consumes read-only `MAIN_FEATURES` and `TIMEFRAMES` from `research.combined_audit_contract` solely to validate the locked canonical Task 10 pair set/order; no record value is built from Feature metadata.
+- Consumes no runtime Feature metadata and imports no Combined Audit contract. `TIMEFRAMES` and all 78 canonical pair keys are literal frozen values copied from the canonical locked Task 10 Main Dossier array.
 - Produces every constant, exact field tuple, locked count, hash, filename, deterministic-context map, and false-scope tuple listed in the global interface section.
 
 - [ ] **Step 1: Write the failing exact-contract tests**
@@ -234,7 +238,7 @@ def test_closed_record_and_locator_schemas_are_exact():
     assert len(TASK11_FALSE_SCOPE_FIELDS) == 17
 ```
 
-In the same test file, add literal-equality tests for every tuple and immutable mapping defined in Step 3: all five package-member hashes; the 24-field Main Dossier schema; raw, eligible-partial, control-partial, 26-field cross-TF, and deterministic-context nested schemas; the complete 43-field Task 11 Manifest schema; all 17 false-scope fields in order; both sorted logical filenames; all four deterministic pair/relation mappings; the exact 24-field Task 10 Manifest schema; and every Task 10 Manifest locked value. These tests compare the complete literal containers, not only their lengths or selected elements.
+In the same test file, add literal-equality tests for every tuple and immutable mapping defined in Step 3: exact `TIMEFRAMES`; all 78 literal canonical pair keys in source order; all five package-member hashes; the 24-field Main Dossier schema; raw, eligible-partial, control-partial, 26-field cross-TF, and deterministic-context nested schemas; the complete 43-field Task 11 Manifest schema; all 17 false-scope fields in order; both sorted logical filenames; all four deterministic pair/relation mappings; the exact 24-field Task 10 Manifest schema; and every Task 10 Manifest locked value. These tests compare the complete literal containers, not only their lengths or selected elements. Assert exactly 78 pair keys and 78 unique values. A later loader test reverses and swaps source records to prove that any order drift fails closed.
 
 - [ ] **Step 2: Run the contract test to prove RED**
 
@@ -246,13 +250,10 @@ Expected: FAIL during collection with `ModuleNotFoundError: No module named 'res
 
 - [ ] **Step 3: Implement the exact constants and schemas**
 
-Create `research/task11_hypothesis_contract.py`. Derive only the canonical pair-key order from the locked upstream feature order; hard-code every Spec/Lock/package binding and every closed schema:
+Create `research/task11_hypothesis_contract.py`. Hard-code every Spec/Lock/package binding and every closed schema. Do not import `MAIN_FEATURES`, `TIMEFRAMES`, or any other value from Combined Audit modules, and do not import or call `itertools.combinations`:
 
 ```python
-from itertools import combinations
 from types import MappingProxyType
-
-from research.combined_audit_contract import MAIN_FEATURES, TIMEFRAMES
 
 TASK11_SPEC_PATH = "docs/superpowers/specs/2026-09-01-task11-evidence-review-hypothesis-registration-design.md"
 TASK11_SPEC_COMMIT = "7a3553770ea51e4ae72662fa44907f507779d22d"
@@ -267,9 +268,86 @@ TASK10_PRODUCTION_PACKAGE_SHA256 = "464465ef3dd435ed3a574bf8ded917095dcb76bb6144
 TASK10_MAIN_DOSSIERS_MEMBER_SHA256 = "954bd97aeb41b33669c99695b88a1715aa01a19bd697282f8e1b437be57de4d3"
 TASK10_MANIFEST_MEMBER_SHA256 = "f6736c59bc120b8ed8bb5bcaf9ea0d3fb65931cfc2a82e142295c33333500a20"
 
-TASK10_CANONICAL_PAIR_KEYS = tuple(
-    f"{feature_x}__{feature_y}"
-    for feature_x, feature_y in combinations(MAIN_FEATURES, 2)
+TIMEFRAMES = ("M5", "M15", "M30", "H1")
+TASK10_CANONICAL_PAIR_KEYS = (
+    "active_bar_count__net_thrust",
+    "active_bar_count__gross_close_path",
+    "active_bar_count__net_close_displacement",
+    "active_bar_count__directional_efficiency",
+    "active_bar_count__directional_continuity_ratio",
+    "active_bar_count__close_confirmation_ratio",
+    "active_bar_count__gap_path_share",
+    "active_bar_count__body_strength_ratio",
+    "active_bar_count__shadow_position_imbalance",
+    "active_bar_count__overlap_ratio",
+    "active_bar_count__normalized_directional_close_ols_slope",
+    "active_bar_count__mean_tick_activity",
+    "net_thrust__gross_close_path",
+    "net_thrust__net_close_displacement",
+    "net_thrust__directional_efficiency",
+    "net_thrust__directional_continuity_ratio",
+    "net_thrust__close_confirmation_ratio",
+    "net_thrust__gap_path_share",
+    "net_thrust__body_strength_ratio",
+    "net_thrust__shadow_position_imbalance",
+    "net_thrust__overlap_ratio",
+    "net_thrust__normalized_directional_close_ols_slope",
+    "net_thrust__mean_tick_activity",
+    "gross_close_path__net_close_displacement",
+    "gross_close_path__directional_efficiency",
+    "gross_close_path__directional_continuity_ratio",
+    "gross_close_path__close_confirmation_ratio",
+    "gross_close_path__gap_path_share",
+    "gross_close_path__body_strength_ratio",
+    "gross_close_path__shadow_position_imbalance",
+    "gross_close_path__overlap_ratio",
+    "gross_close_path__normalized_directional_close_ols_slope",
+    "gross_close_path__mean_tick_activity",
+    "net_close_displacement__directional_efficiency",
+    "net_close_displacement__directional_continuity_ratio",
+    "net_close_displacement__close_confirmation_ratio",
+    "net_close_displacement__gap_path_share",
+    "net_close_displacement__body_strength_ratio",
+    "net_close_displacement__shadow_position_imbalance",
+    "net_close_displacement__overlap_ratio",
+    "net_close_displacement__normalized_directional_close_ols_slope",
+    "net_close_displacement__mean_tick_activity",
+    "directional_efficiency__directional_continuity_ratio",
+    "directional_efficiency__close_confirmation_ratio",
+    "directional_efficiency__gap_path_share",
+    "directional_efficiency__body_strength_ratio",
+    "directional_efficiency__shadow_position_imbalance",
+    "directional_efficiency__overlap_ratio",
+    "directional_efficiency__normalized_directional_close_ols_slope",
+    "directional_efficiency__mean_tick_activity",
+    "directional_continuity_ratio__close_confirmation_ratio",
+    "directional_continuity_ratio__gap_path_share",
+    "directional_continuity_ratio__body_strength_ratio",
+    "directional_continuity_ratio__shadow_position_imbalance",
+    "directional_continuity_ratio__overlap_ratio",
+    "directional_continuity_ratio__normalized_directional_close_ols_slope",
+    "directional_continuity_ratio__mean_tick_activity",
+    "close_confirmation_ratio__gap_path_share",
+    "close_confirmation_ratio__body_strength_ratio",
+    "close_confirmation_ratio__shadow_position_imbalance",
+    "close_confirmation_ratio__overlap_ratio",
+    "close_confirmation_ratio__normalized_directional_close_ols_slope",
+    "close_confirmation_ratio__mean_tick_activity",
+    "gap_path_share__body_strength_ratio",
+    "gap_path_share__shadow_position_imbalance",
+    "gap_path_share__overlap_ratio",
+    "gap_path_share__normalized_directional_close_ols_slope",
+    "gap_path_share__mean_tick_activity",
+    "body_strength_ratio__shadow_position_imbalance",
+    "body_strength_ratio__overlap_ratio",
+    "body_strength_ratio__normalized_directional_close_ols_slope",
+    "body_strength_ratio__mean_tick_activity",
+    "shadow_position_imbalance__overlap_ratio",
+    "shadow_position_imbalance__normalized_directional_close_ols_slope",
+    "shadow_position_imbalance__mean_tick_activity",
+    "overlap_ratio__normalized_directional_close_ols_slope",
+    "overlap_ratio__mean_tick_activity",
+    "normalized_directional_close_ols_slope__mean_tick_activity",
 )
 
 HYPOTHESIS_ID_PREFIX = "TASK11_HYPOTHESIS__"
@@ -644,7 +722,7 @@ Add exact structural drift tests for:
 1. Main Dossier root is not an array.
 2. Count is 77 or 79.
 3. Duplicate `pair_key`.
-4. Pair array order differs from `TASK10_CANONICAL_PAIR_KEYS`.
+4. Pair array order differs from `TASK10_CANONICAL_PAIR_KEYS`. Implement two explicit mutations: reverse all 78 Main Dossiers and swap indexes 0/1 while preserving every record value; both must raise `ValueError` matching `canonical pair order`.
 5. A record has one missing or one extra top-level Task 10 field.
 6. `pair_key != feature_x + "__" + feature_y`, identical features, or non-string features.
 7. A raw/partial map lacks one of `M5/M15/M30/H1` or has an extra timeframe.
@@ -930,10 +1008,12 @@ def artifact_bytes(directory: Path) -> dict[str, bytes]:
 def test_private_pipeline_is_byte_deterministic_and_scope_locked(tmp_path: Path):
     package = make_synthetic_task10_production_zip()
     bundle = load_synthetic_task10(package)
-    first_dir = tmp_path / "first"
-    second_dir = tmp_path / "second"
-    first_zip = tmp_path / "first.zip"
-    second_zip = tmp_path / "second.zip"
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_dir = first_root / "logical"
+    second_dir = second_root / "logical"
+    first_zip = first_root / OUTPUT_ZIP_FILENAME
+    second_zip = second_root / OUTPUT_ZIP_FILENAME
 
     first_manifest = _run_task11_from_bundle(
         bundle,
@@ -952,6 +1032,21 @@ def test_private_pipeline_is_byte_deterministic_and_scope_locked(tmp_path: Path)
     assert artifact_bytes(first_dir) == artifact_bytes(second_dir)
     assert first_zip.read_bytes() == second_zip.read_bytes()
     assert first_manifest == second_manifest
+
+
+def test_private_pipeline_rejects_noncanonical_zip_before_output(tmp_path: Path):
+    bundle = load_synthetic_task10(make_synthetic_task10_production_zip())
+    output_dir = tmp_path / "noncanonical-output"
+    output_zip = tmp_path / "noncanonical.zip"
+    with pytest.raises(ValueError, match="production ZIP basename"):
+        _run_task11_from_bundle(
+            bundle,
+            output_dir,
+            implementation_commit="a" * 40,
+            output_zip=output_zip,
+        )
+    assert not output_dir.exists()
+    assert not output_zip.exists()
 ```
 
 Parse the registry and manifest and assert registry count 78, manifest key set exactly `TASK11_MANIFEST_FIELDS`, `hypothesis_registry_sha256` equals the SHA-256 of the exact written registry bytes, and all 17 `TASK11_FALSE_SCOPE_FIELDS` are exactly `False` by identity.
@@ -969,6 +1064,16 @@ Expected: FAIL during collection because `research.run_task11_hypothesis_registr
 Append to `research/task11_hypothesis_io.py`:
 
 ```python
+def _validate_output_zip_path(output_zip: Path) -> Path:
+    destination = Path(output_zip)
+    if destination.name != OUTPUT_ZIP_FILENAME:
+        raise ValueError(
+            "Task 11 production ZIP basename must equal "
+            f"{OUTPUT_ZIP_FILENAME!r}"
+        )
+    return destination
+
+
 def _json_bytes(value: object) -> bytes:
     return (
         json.dumps(
@@ -1006,13 +1111,15 @@ def _write_deterministic_zip(path: Path, members: Mapping[str, bytes]) -> None:
 
 `write_task11_outputs()` must perform every validation in memory before `mkdir()` or the first write:
 
-1. `implementation_commit` matches lowercase SHA-1 regex `[0-9a-f]{40}`.
-2. Registry validates against the supplied source dossiers before this writer is called.
-3. Manifest key set exactly equals `TASK11_MANIFEST_FIELDS`.
-4. `task11_implementation_commit` equals the supplied implementation commit with exact string type.
-5. Manifest `hypothesis_registry_sha256` equals `sha256(_json_bytes(registry))`.
-6. All locked manifest constants/counts/policies/false flags are exact with type-sensitive comparison.
-7. Member mapping is exactly the two `TASK11_LOGICAL_FILENAMES`.
+1. `_validate_output_zip_path(output_zip)` accepts the path; a noncanonical basename fails first.
+2. `implementation_commit` matches lowercase SHA-1 regex `[0-9a-f]{40}`.
+3. Registry validates against the supplied source dossiers before this writer is called.
+4. Manifest key set exactly equals `TASK11_MANIFEST_FIELDS`.
+5. `task11_implementation_commit` equals the supplied implementation commit with exact string type.
+6. Manifest `production_archive_filename` equals `OUTPUT_ZIP_FILENAME` exactly.
+7. Manifest `hypothesis_registry_sha256` equals `sha256(_json_bytes(registry))`.
+8. All locked manifest constants/counts/policies/false flags are exact with type-sensitive comparison.
+9. Member mapping is exactly the two `TASK11_LOGICAL_FILENAMES`.
 
 Only after those checks, write the two logical files and the required ZIP. `output_zip` has no `None` branch.
 
@@ -1068,6 +1175,7 @@ def _run_task11_from_bundle(
     implementation_commit: str,
     output_zip: Path,
 ) -> dict[str, object]:
+    output_zip = _validate_output_zip_path(output_zip)
     registry = build_hypothesis_registry(bundle.main_dossiers)
     validate_hypothesis_registry(registry, bundle.main_dossiers)
     registry_bytes = _json_bytes(registry)
@@ -1104,7 +1212,7 @@ def _run_task11_from_bundle(
     return manifest
 ```
 
-The `sum()` calls classify already-copied locked states; they do not compute a research statistic. `_build_manifest()` also verifies `bundle.production_zip_sha256` and both relevant member hashes against the canonical constants before returning.
+The basename gate is the first private-pipeline operation and creates nothing. The `sum()` calls classify already-copied locked states; they do not compute a research statistic. `_build_manifest()` also verifies `bundle.production_zip_sha256` and both relevant member hashes against the canonical constants before returning.
 
 - [ ] **Step 5: Write RED tests for manifest drift, fail-closed output, and ZIP metadata**
 
@@ -1143,8 +1251,9 @@ def test_writer_rejects_manifest_drift_before_creating_output(
         deterministic_context_pair_count=4,
     )
     manifest[field] = bad_value
-    output_dir = tmp_path / "rejected"
-    output_zip = tmp_path / "rejected.zip"
+    rejected_root = tmp_path / "rejected"
+    output_dir = rejected_root / "logical"
+    output_zip = rejected_root / OUTPUT_ZIP_FILENAME
     with pytest.raises(ValueError, match="manifest"):
         write_task11_outputs(
             output_dir,
@@ -1157,7 +1266,7 @@ def test_writer_rejects_manifest_drift_before_creating_output(
     assert not output_zip.exists()
 ```
 
-Add one missing-key and one extra-key manifest test. Add a registry-hash mismatch test. Add ZIP assertions:
+Add one missing-key and one extra-key manifest test. Add a registry-hash mismatch test. Retain the Step 1 noncanonical-basename/no-output test as a required gate. Add ZIP assertions:
 
 ```python
 with zipfile.ZipFile(first_zip) as archive:
@@ -1206,7 +1315,7 @@ Expected: one commit containing exactly the three Task 4 paths.
 
 **Interfaces:**
 - Produces `assert_clean_committed_task11_worktree() -> str`, public `run_task11()`, `build_parser()`, and `main()`.
-- Public flow is strictly `guard → canonical loader → private deterministic pipeline`.
+- Public flow is strictly `guard → canonical output-ZIP basename gate → canonical loader → private deterministic pipeline`.
 - Captured guard SHA is the sole value allowed in `task11_implementation_commit`.
 
 - [ ] **Step 1: Write RED tests for the public signature and CLI surface**
@@ -1267,9 +1376,36 @@ def test_public_flow_stops_at_guard_before_loader_or_output(tmp_path, monkeypatc
         )
     assert not output_dir.exists()
     assert not output_zip.exists()
+
+
+def test_public_flow_rejects_noncanonical_zip_before_loader_or_output(
+    tmp_path, monkeypatch
+):
+    import research.run_task11_hypothesis_registration as runner
+
+    monkeypatch.setattr(
+        runner, "assert_clean_committed_task11_worktree", lambda: "b" * 40
+    )
+
+    def loader_must_not_run(_path):
+        raise AssertionError("loader ran after invalid output ZIP basename")
+
+    monkeypatch.setattr(
+        runner, "load_task10_production_package", loader_must_not_run
+    )
+    output_dir = tmp_path / "noncanonical-output"
+    output_zip = tmp_path / "noncanonical.zip"
+    with pytest.raises(ValueError, match="production ZIP basename"):
+        run_task11(
+            tmp_path / "unused.zip",
+            output_dir,
+            output_zip=output_zip,
+        )
+    assert not output_dir.exists()
+    assert not output_zip.exists()
 ```
 
-Add a second test that monkeypatches the guard to return `"b" * 40`, supplies a validated synthetic bundle through the loader, runs `run_task11()`, and asserts both the returned and written Manifest contain exactly `"b" * 40` as `task11_implementation_commit`.
+Add a successful-flow test that monkeypatches the guard to return `"b" * 40`, supplies a validated synthetic bundle through the loader, uses `tmp_path / "accepted" / OUTPUT_ZIP_FILENAME`, runs `run_task11()`, and asserts both the returned and written Manifest contain exactly `"b" * 40` as `task11_implementation_commit` and the created ZIP basename equals `OUTPUT_ZIP_FILENAME`.
 
 - [ ] **Step 3: Write RED tests for clean committed repository provenance**
 
@@ -1352,6 +1488,7 @@ def run_task11(
     output_zip: Path,
 ) -> dict[str, object]:
     implementation_commit = assert_clean_committed_task11_worktree()
+    output_zip = _validate_output_zip_path(output_zip)
     bundle = load_task10_production_package(input_task10_production)
     return _run_task11_from_bundle(
         bundle,
@@ -1377,7 +1514,7 @@ parser.add_argument("--output-zip", required=True, type=Path)
 pytest -q tests/test_task11_hypothesis_integration.py
 ```
 
-Expected: PASS; signature, CLI, guard ordering, exact implementation SHA propagation, clean/dirty/index/missing-path/ancestry/blob cases, and no-output-on-guard-failure tests pass; pytest exits 0.
+Expected: PASS; signature, CLI, guard ordering, canonical output-ZIP basename enforcement before input loading/output creation, exact implementation SHA propagation, clean/dirty/index/missing-path/ancestry/blob cases, and no-output-on-failure tests pass; pytest exits 0.
 
 - [ ] **Step 8: Run all Task 11 tests**
 
@@ -1533,7 +1670,7 @@ Expected: both commands exit 0.
 
 - [ ] **Step 8: Static no-statistics/no-unauthorized-scope inspection**
 
-Run an AST scan over the four new production modules. Fail if they import `statistics`, `numpy`, `pandas`, `scipy`, `research.combined_audit_stats`, or `src`; fail if any call target is named `spearman_pairwise`, `partial_spearman_duration`, `corr`, `rank`, `score`, `predict`, `optimize`, `ablate`, or `causal_replay`.
+Run an AST scan over the four new production modules. Fail if they import `itertools`, `statistics`, `numpy`, `pandas`, `scipy`, `research.combined_audit_contract`, `research.combined_audit_stats`, or `src`; fail if any call target is named `spearman_pairwise`, `partial_spearman_duration`, `corr`, `rank`, `score`, `predict`, `optimize`, `ablate`, or `causal_replay`.
 
 ```bash
 python - <<'PY'
@@ -1547,9 +1684,12 @@ paths = [
     Path("research/run_task11_hypothesis_registration.py"),
 ]
 forbidden_import_roots = {
-    "statistics", "numpy", "pandas", "scipy", "src"
+    "itertools", "statistics", "numpy", "pandas", "scipy", "src"
 }
-forbidden_modules = {"research.combined_audit_stats"}
+forbidden_modules = {
+    "research.combined_audit_contract",
+    "research.combined_audit_stats",
+}
 forbidden_calls = {
     "spearman_pairwise", "partial_spearman_duration", "corr", "rank",
     "score", "predict", "optimize", "ablate", "causal_replay",
@@ -1644,30 +1784,32 @@ Expected: exit 0. Mismatch is a blocker before ZIP parsing.
 ```bash
 TASK11_RUN_ROOT="$(mktemp -d)"
 export TASK11_RUN_ROOT
+TASK11_OUTPUT_ZIP_FILENAME="TASK11_EVIDENCE_REVIEW_HYPOTHESIS_REGISTRATION_PACKAGE.zip"
+export TASK11_OUTPUT_ZIP_FILENAME
 python -m research.run_task11_hypothesis_registration \
   --input-task10-production "$TASK11_TASK10_ZIP" \
-  --output-dir "$TASK11_RUN_ROOT/run1" \
-  --output-zip "$TASK11_RUN_ROOT/TASK11_PRODUCTION_RUN1.zip"
+  --output-dir "$TASK11_RUN_ROOT/run1/logical" \
+  --output-zip "$TASK11_RUN_ROOT/run1/$TASK11_OUTPUT_ZIP_FILENAME"
 python -m research.run_task11_hypothesis_registration \
   --input-task10-production "$TASK11_TASK10_ZIP" \
-  --output-dir "$TASK11_RUN_ROOT/run2" \
-  --output-zip "$TASK11_RUN_ROOT/TASK11_PRODUCTION_RUN2.zip"
+  --output-dir "$TASK11_RUN_ROOT/run2/logical" \
+  --output-zip "$TASK11_RUN_ROOT/run2/$TASK11_OUTPUT_ZIP_FILENAME"
 ```
 
-Expected: both commands exit 0 and create exactly two logical files per run plus one ZIP per run. Do not use the private synthetic seam.
+Expected: both commands exit 0 and create exactly two logical files per run plus one ZIP per run. Both ZIP paths have the exact canonical basename under different parent directories. Do not use the private synthetic seam.
 
 - [ ] **Step 4: Byte-compare both logical files and both ZIPs**
 
 ```bash
 cmp \
-  "$TASK11_RUN_ROOT/run1/TASK11_HYPOTHESIS_REGISTRY.json" \
-  "$TASK11_RUN_ROOT/run2/TASK11_HYPOTHESIS_REGISTRY.json"
+  "$TASK11_RUN_ROOT/run1/logical/TASK11_HYPOTHESIS_REGISTRY.json" \
+  "$TASK11_RUN_ROOT/run2/logical/TASK11_HYPOTHESIS_REGISTRY.json"
 cmp \
-  "$TASK11_RUN_ROOT/run1/TASK11_MANIFEST.json" \
-  "$TASK11_RUN_ROOT/run2/TASK11_MANIFEST.json"
+  "$TASK11_RUN_ROOT/run1/logical/TASK11_MANIFEST.json" \
+  "$TASK11_RUN_ROOT/run2/logical/TASK11_MANIFEST.json"
 cmp \
-  "$TASK11_RUN_ROOT/TASK11_PRODUCTION_RUN1.zip" \
-  "$TASK11_RUN_ROOT/TASK11_PRODUCTION_RUN2.zip"
+  "$TASK11_RUN_ROOT/run1/$TASK11_OUTPUT_ZIP_FILENAME" \
+  "$TASK11_RUN_ROOT/run2/$TASK11_OUTPUT_ZIP_FILENAME"
 ```
 
 Expected: all three `cmp` commands exit 0 with no output.
@@ -1684,6 +1826,7 @@ import zipfile
 
 from research.task11_hypothesis_contract import (
     DETERMINISTIC_RELATION_IDS_BY_PAIR_KEY,
+    OUTPUT_ZIP_FILENAME,
     TASK11_FALSE_SCOPE_FIELDS,
     TASK11_HYPOTHESIS_RECORD_FIELDS,
     TASK11_LOGICAL_FILENAMES,
@@ -1700,8 +1843,8 @@ with zipfile.ZipFile(source_zip) as archive:
     source = json.loads(
         archive.read("TASK10_MAIN_RELATIONSHIP_DOSSIERS.json")
     )
-registry_path = root / "run1" / "TASK11_HYPOTHESIS_REGISTRY.json"
-manifest_path = root / "run1" / "TASK11_MANIFEST.json"
+registry_path = root / "run1" / "logical" / "TASK11_HYPOTHESIS_REGISTRY.json"
+manifest_path = root / "run1" / "logical" / "TASK11_MANIFEST.json"
 registry_bytes = registry_path.read_bytes()
 registry = json.loads(registry_bytes)
 manifest = json.loads(manifest_path.read_bytes())
@@ -1808,13 +1951,14 @@ assert manifest["logical_file_count"] == 2
 assert all(manifest[field] is False for field in TASK11_FALSE_SCOPE_FIELDS)
 
 for run_number in (1, 2):
-    path = root / f"TASK11_PRODUCTION_RUN{run_number}.zip"
+    path = root / f"run{run_number}" / OUTPUT_ZIP_FILENAME
+    assert path.name == OUTPUT_ZIP_FILENAME
     with zipfile.ZipFile(path) as archive:
         assert archive.namelist() == sorted(TASK11_LOGICAL_FILENAMES)
         assert {
             name: archive.read(name) for name in archive.namelist()
         } == {
-            name: (root / f"run{run_number}" / name).read_bytes()
+            name: (root / f"run{run_number}" / "logical" / name).read_bytes()
             for name in TASK11_LOGICAL_FILENAMES
         }
         for info in archive.infolist():
@@ -1860,21 +2004,23 @@ Expected: every command exits 0 with zero failures/errors.
 TASK11_TASK10_SHA_AFTER="$(sha256sum "$TASK11_TASK10_ZIP" | awk '{print $1}')"
 test "$TASK11_TASK10_SHA_AFTER" = "$TASK11_TASK10_SHA_BEFORE"
 test "$TASK11_TASK10_SHA_AFTER" = "464465ef3dd435ed3a574bf8ded917095dcb76bb614416625b8c96db78c48903"
-TASK11_RUN1_REGISTRY_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run1/TASK11_HYPOTHESIS_REGISTRY.json" | awk '{print $1}')"
-TASK11_RUN2_REGISTRY_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run2/TASK11_HYPOTHESIS_REGISTRY.json" | awk '{print $1}')"
-TASK11_RUN1_MANIFEST_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run1/TASK11_MANIFEST.json" | awk '{print $1}')"
-TASK11_RUN2_MANIFEST_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run2/TASK11_MANIFEST.json" | awk '{print $1}')"
-TASK11_RUN1_ZIP_SHA256="$(sha256sum "$TASK11_RUN_ROOT/TASK11_PRODUCTION_RUN1.zip" | awk '{print $1}')"
-TASK11_RUN2_ZIP_SHA256="$(sha256sum "$TASK11_RUN_ROOT/TASK11_PRODUCTION_RUN2.zip" | awk '{print $1}')"
+TASK11_RUN1_REGISTRY_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run1/logical/TASK11_HYPOTHESIS_REGISTRY.json" | awk '{print $1}')"
+TASK11_RUN2_REGISTRY_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run2/logical/TASK11_HYPOTHESIS_REGISTRY.json" | awk '{print $1}')"
+TASK11_RUN1_MANIFEST_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run1/logical/TASK11_MANIFEST.json" | awk '{print $1}')"
+TASK11_RUN2_MANIFEST_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run2/logical/TASK11_MANIFEST.json" | awk '{print $1}')"
+TASK11_RUN1_ZIP_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run1/$TASK11_OUTPUT_ZIP_FILENAME" | awk '{print $1}')"
+TASK11_RUN2_ZIP_SHA256="$(sha256sum "$TASK11_RUN_ROOT/run2/$TASK11_OUTPUT_ZIP_FILENAME" | awk '{print $1}')"
 test "$TASK11_RUN1_REGISTRY_SHA256" = "$TASK11_RUN2_REGISTRY_SHA256"
 test "$TASK11_RUN1_MANIFEST_SHA256" = "$TASK11_RUN2_MANIFEST_SHA256"
 test "$TASK11_RUN1_ZIP_SHA256" = "$TASK11_RUN2_ZIP_SHA256"
 TASK11_FINAL_ZIP_SHA256="$TASK11_RUN1_ZIP_SHA256"
-TASK11_FINAL_ZIP_SIZE="$(stat -c '%s' "$TASK11_RUN_ROOT/TASK11_PRODUCTION_RUN1.zip")"
+TASK11_FINAL_ZIP_PATH="$TASK11_RUN_ROOT/run1/$TASK11_OUTPUT_ZIP_FILENAME"
+test "$(basename "$TASK11_FINAL_ZIP_PATH")" = "$TASK11_OUTPUT_ZIP_FILENAME"
+TASK11_FINAL_ZIP_SIZE="$(stat -c '%s' "$TASK11_FINAL_ZIP_PATH")"
 export TASK11_RUN1_REGISTRY_SHA256 TASK11_RUN2_REGISTRY_SHA256
 export TASK11_RUN1_MANIFEST_SHA256 TASK11_RUN2_MANIFEST_SHA256
 export TASK11_RUN1_ZIP_SHA256 TASK11_RUN2_ZIP_SHA256
-export TASK11_FINAL_ZIP_SHA256 TASK11_FINAL_ZIP_SIZE
+export TASK11_FINAL_ZIP_PATH TASK11_FINAL_ZIP_SHA256 TASK11_FINAL_ZIP_SIZE
 git diff --quiet
 git diff --cached --quiet
 test -z "$(git status --porcelain=v1 --untracked-files=no)"
@@ -1884,12 +2030,13 @@ printf 'TASK11_RUN1_MANIFEST_SHA256=%s\n' "$TASK11_RUN1_MANIFEST_SHA256"
 printf 'TASK11_RUN2_MANIFEST_SHA256=%s\n' "$TASK11_RUN2_MANIFEST_SHA256"
 printf 'TASK11_RUN1_ZIP_SHA256=%s\n' "$TASK11_RUN1_ZIP_SHA256"
 printf 'TASK11_RUN2_ZIP_SHA256=%s\n' "$TASK11_RUN2_ZIP_SHA256"
+printf 'TASK11_FINAL_ZIP_PATH=%s\n' "$TASK11_FINAL_ZIP_PATH"
 printf 'TASK11_FINAL_ZIP_SHA256=%s\n' "$TASK11_FINAL_ZIP_SHA256"
 printf 'TASK11_FINAL_ZIP_SIZE=%s\n' "$TASK11_FINAL_ZIP_SIZE"
 printf 'TASK11_RUN_ROOT=%s\n' "$TASK11_RUN_ROOT"
 ```
 
-Expected: all checks exit 0; the paired registry, manifest, and ZIP hashes match; and the nine printed values identify both runs, the final byte-identical production ZIP, and the retained output root. Re-run Task 6 Steps 6–8 to reconfirm the exact implementation allowlist, protected paths, and static scope scan.
+Expected: all checks exit 0; the paired registry, manifest, and ZIP hashes match; the selected final path ends with the canonical filename; and the ten printed values identify both runs, the final byte-identical production ZIP, and the retained output root. Re-run Task 6 Steps 6–8 to reconfirm the exact implementation allowlist, protected paths, and static scope scan.
 
 - [ ] **Step 8: Report production and stop**
 
@@ -1904,7 +2051,7 @@ Create no production commit. Stop. Do not proceed to Controlled Ablation Design/
 | Locked Spec requirement | Plan implementation / validation |
 |---|---|
 | Purpose and no-answer boundary (Sections 1, 4, 19) | Global Constraints; Tasks 3, 6 Step 8, Task 7 Step 8 |
-| Source-of-truth and no inference (Section 2) | Canonical Input Binding; Task 2 hash-first loader; Task 3 exact source copies |
+| Source-of-truth and no inference (Section 2) | Canonical Input Binding; Task 1 literal TF/pair-order contract with no Combined Audit dependency; Task 2 hash-first loader/order rejection; Task 3 exact source copies |
 | Task 10 package/implementation/member provenance (Section 3) | Task 1 constants; Task 2 Steps 2–7; Task 7 Steps 1–2 and 7 |
 | Pairwise-only universe and exactly 78 records (Section 5) | Task 1 pair contract; Task 2 source validation; Task 3 Steps 1–6; Task 7 Step 5 |
 | Deterministic reversible ID (Section 6) | Task 1 prefix; Task 3 Steps 1, 3, 5; Task 7 Step 5 |
@@ -1916,11 +2063,11 @@ Create no production commit. Stop. Do not proceed to Controlled Ablation Design/
 | Closed source locators (Section 10) | Task 1 locator schema; Task 2 locator validation; Task 3 exact mapping tests; Task 7 Step 5 |
 | Intentionally omitted Task 10 fields (Section 11) | Task 3 Steps 4–5; Task 7 Step 5 |
 | Prohibited fields/semantics (Section 12) | Global Constraints; Task 1 false-scope/prohibited schema tests; Task 3 prohibition tests; Task 6 AST scan; Task 7 Step 8 |
-| Two logical outputs and required archive (Section 13) | Task 1 filenames; Task 4 writer/repeatability; Task 7 Steps 3–5 |
+| Two logical outputs and required canonical archive basename (Section 13) | Task 1 filenames; Task 4 pre-write basename gate/writer/repeatability; Task 5 public basename rejection; Task 7 Steps 3–5 |
 | Closed manifest and exact provenance/count/scope values (Section 13.2) | Task 1 manifest contract; Task 4 Steps 4–5; Task 5 guard SHA; Task 7 Step 5 |
 | Source-order preservation and deterministic serialization/ZIP (Section 14) | Task 2 canonical order; Task 3 order preservation; Task 4 deterministic tests; Task 7 Steps 4–5 |
 | Package/Main Dossier/Hypothesis/output validation (Section 15) | Tasks 1–5 test cycles; Task 7 Steps 2, 4–5 |
-| Fail-closed before output and contextual errors (Section 16) | Task 2 invalid-input tests; Task 3 validator; Task 4 no-output tests; Task 5 guard-first tests |
+| Fail-closed before output and contextual errors (Section 16) | Task 2 invalid-input tests; Task 3 validator; Task 4 no-output/basename tests; Task 5 guard-first and public basename-gate tests |
 | Clean committed production provenance and no public overrides (Section 17) | Task 5 Steps 1–7; Task 7 Step 1 |
 | Research-only non-regression/scope isolation (Section 18) | Planned File Structure; Task 6 Steps 3–8; Task 7 Steps 6–7 |
 | Design-phase lock and immutable approved bytes (Section 20 plus Lock Record) | Global Constraints; Task 5 ancestry/blob guard; Task 6 Step 7 |
@@ -1935,9 +2082,11 @@ Create no production commit. Stop. Do not proceed to Controlled Ablation Design/
 - [x] Planned implementation paths are exactly four new `research/task11_*`/runner files and four new Task 11 test files.
 - [x] `src/`, `evidence/`, Combined Audit, Task 10, locked Spec, Lock Record, and Plan paths are protected by exact diff/hash gates.
 - [x] Public loader/runner/CLI cannot override canonical SHA, loader, bundle, template, ID, ordering, counts, implementation SHA, or scope.
-- [x] The required archive is never treated as optional.
+- [x] Production code imports no Combined Audit metadata; `TIMEFRAMES` and the ordered 78-pair universe are literal canonical Task 10 package values, with exact/reversed/swapped-order tests.
+- [x] The required archive is never treated as optional, and every private/public/production path enforces the exact canonical basename before output creation.
+- [x] Execution starts at the latest committed Plan version, requires the Spec Lock commit as an ancestor, and revalidates both locked blobs without assuming direct parentage.
 - [x] No unresolved design marker, unbound interface, deferred branch, or unspecified validation remains.
 
 ## Plan Review Gate
 
-This Plan requires human review before any implementation task is authorized. After Plan approval, execution must start from the committed Plan HEAD, use the execution-baseline command above, and follow Tasks 1–6 in order. Task 7 remains separately authorization-gated even after implementation verification passes.
+This Plan requires human review before any implementation task is authorized. After Plan approval, execution must start from the latest committed Plan HEAD, use the execution-baseline command above, verify the Spec Lock commit as an ancestor plus both immutable blobs, and follow Tasks 1–6 in order. Task 7 remains separately authorization-gated even after implementation verification passes.
