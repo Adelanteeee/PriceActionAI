@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import math
+import re
 import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -34,6 +35,24 @@ from research.task11_hypothesis_contract import (
     TASK10_MEMBER_SHA256_BY_FILENAME,
     TASK10_PRODUCTION_PACKAGE_SHA256,
     TASK10_RAW_TF_FIELDS,
+    CONTROL_FEATURE_NON_APPLICABLE_COUNT,
+    DETERMINISTIC_CONTEXT_PAIR_COUNT,
+    DURATION_CONTROL_ELIGIBLE_COUNT,
+    HYPOTHESIS_COUNT,
+    HYPOTHESIS_ID_PREFIX,
+    LOGICAL_FILE_COUNT,
+    MAIN_PAIR_COUNT,
+    OUTPUT_ZIP_FILENAME,
+    TASK10_IMPLEMENTATION_COMMIT,
+    TASK10_MAIN_DOSSIERS_MEMBER_SHA256,
+    TASK10_MANIFEST_MEMBER_SHA256,
+    TASK10_PRODUCTION_PACKAGE_FILENAME,
+    TASK10_PRODUCTION_PACKAGE_SHA256,
+    TASK11_FALSE_SCOPE_FIELDS,
+    TASK11_LOGICAL_FILENAMES,
+    TASK11_MANIFEST_FIELDS,
+    TASK11_SPEC_COMMIT,
+    TEST_QUESTION_TEMPLATE_ID,
     TIMEFRAMES,
 )
 
@@ -380,6 +399,151 @@ def load_task10_production_package(path: Path) -> Task10ProductionBundle:
         expected_package_sha256=TASK10_PRODUCTION_PACKAGE_SHA256,
         expected_member_sha256_by_filename=TASK10_MEMBER_SHA256_BY_FILENAME,
     )
+
+
+_LOWER_SHA1 = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def _validate_output_zip_path(output_zip: Path) -> Path:
+    destination = Path(output_zip)
+    if destination.name != OUTPUT_ZIP_FILENAME:
+        raise ValueError(
+            "Task 11 production ZIP basename must equal "
+            f"{OUTPUT_ZIP_FILENAME!r}"
+        )
+    return destination
+
+
+def _json_bytes(value: object) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _write_deterministic_zip(path: Path, members: Mapping[str, bytes]) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(
+        destination,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    ) as archive:
+        for name in sorted(members):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(
+                info,
+                members[name],
+                compress_type=zipfile.ZIP_DEFLATED,
+                compresslevel=9,
+            )
+
+
+def _exact_manifest_value(
+    manifest: Mapping[str, object], field: str, expected: object
+) -> None:
+    actual = manifest[field]
+    if type(actual) is not type(expected) or actual != expected:
+        raise ValueError(f"Task 11 manifest {field} does not match locked value")
+
+
+def _validate_task11_manifest(
+    manifest: Mapping[str, object], *, implementation_commit: str, registry: object
+) -> bytes:
+    if set(manifest) != set(TASK11_MANIFEST_FIELDS):
+        raise ValueError("Task 11 manifest fields do not match the closed schema")
+    _exact_manifest_value(
+        manifest, "task", "Task 11 — Evidence Review & Hypothesis Registration"
+    )
+    _exact_manifest_value(manifest, "task11_spec_commit", TASK11_SPEC_COMMIT)
+    _exact_manifest_value(
+        manifest, "task11_implementation_commit", implementation_commit
+    )
+    _exact_manifest_value(
+        manifest, "hypothesis_registry_filename", TASK11_LOGICAL_FILENAMES[0]
+    )
+    _exact_manifest_value(
+        manifest, "production_archive_filename", OUTPUT_ZIP_FILENAME
+    )
+    _exact_manifest_value(
+        manifest, "logical_output_filenames", list(TASK11_LOGICAL_FILENAMES)
+    )
+    for field, expected in (
+        ("task10_implementation_commit", TASK10_IMPLEMENTATION_COMMIT),
+        ("task10_production_package_filename", TASK10_PRODUCTION_PACKAGE_FILENAME),
+        ("task10_production_package_sha256", TASK10_PRODUCTION_PACKAGE_SHA256),
+        ("task10_main_dossiers_member_sha256", TASK10_MAIN_DOSSIERS_MEMBER_SHA256),
+        ("task10_manifest_member_sha256", TASK10_MANIFEST_MEMBER_SHA256),
+        ("hypothesis_unit", "PAIRWISE_ONLY"),
+        ("hypothesis_cardinality", "EXACTLY_ONE_PER_CANONICAL_PAIR"),
+        ("hypothesis_id_policy", "DETERMINISTIC_FROM_PAIR_KEY"),
+        ("hypothesis_id_prefix", HYPOTHESIS_ID_PREFIX),
+        ("test_question_policy", "SINGLE_FIXED_TEMPLATE"),
+        ("test_question_template_id", TEST_QUESTION_TEMPLATE_ID),
+        ("evidence_summary_policy", "COPY_LOCKED_TASK10_OBSERVATIONS"),
+        ("cross_tf_evidence_policy", "COPY_LOCKED_TASK10_CROSS_TF"),
+        ("main_pair_count", MAIN_PAIR_COUNT),
+        ("hypothesis_count", HYPOTHESIS_COUNT),
+        ("duration_control_eligible_count", DURATION_CONTROL_ELIGIBLE_COUNT),
+        (
+            "control_feature_non_applicable_count",
+            CONTROL_FEATURE_NON_APPLICABLE_COUNT,
+        ),
+        ("deterministic_context_pair_count", DETERMINISTIC_CONTEXT_PAIR_COUNT),
+        ("logical_file_count", LOGICAL_FILE_COUNT),
+    ):
+        _exact_manifest_value(manifest, field, expected)
+    for field in TASK11_FALSE_SCOPE_FIELDS:
+        _exact_manifest_value(manifest, field, False)
+    registry_bytes = _json_bytes(registry)
+    _exact_manifest_value(
+        manifest,
+        "hypothesis_registry_sha256",
+        hashlib.sha256(registry_bytes).hexdigest(),
+    )
+    return registry_bytes
+
+
+def write_task11_outputs(
+    output_dir: Path,
+    *,
+    implementation_commit: str,
+    registry: Sequence[Mapping[str, object]],
+    manifest: Mapping[str, object],
+    output_zip: Path,
+) -> None:
+    """Write the exact Task 11 logical files and their reproducible archive."""
+    destination_zip = _validate_output_zip_path(output_zip)
+    if type(implementation_commit) is not str or not _LOWER_SHA1.fullmatch(
+        implementation_commit
+    ):
+        raise ValueError("Task 11 implementation commit must be lowercase SHA-1")
+    registry_bytes = _validate_task11_manifest(
+        manifest, implementation_commit=implementation_commit, registry=registry
+    )
+    manifest_bytes = _json_bytes(manifest)
+    members = {
+        TASK11_LOGICAL_FILENAMES[0]: registry_bytes,
+        TASK11_LOGICAL_FILENAMES[1]: manifest_bytes,
+    }
+    if set(members) != set(TASK11_LOGICAL_FILENAMES):
+        raise RuntimeError("Task 11 logical output member schema drifted")
+
+    destination_dir = Path(output_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for name in TASK11_LOGICAL_FILENAMES:
+        (destination_dir / name).write_bytes(members[name])
+    _write_deterministic_zip(destination_zip, members)
 
 
 __all__ = ["Task10ProductionBundle", "load_task10_production_package"]
