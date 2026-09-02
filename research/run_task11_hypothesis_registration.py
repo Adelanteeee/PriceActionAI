@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import re
+import subprocess
 from pathlib import Path
 
 from research.task11_hypothesis_contract import (
@@ -23,13 +25,19 @@ from research.task11_hypothesis_contract import (
     TASK11_FALSE_SCOPE_FIELDS,
     TASK11_LOGICAL_FILENAMES,
     TASK11_MANIFEST_FIELDS,
+    TASK11_SPEC_BLOB_SHA,
     TASK11_SPEC_COMMIT,
+    TASK11_SPEC_LOCK_COMMIT,
+    TASK11_SPEC_LOCK_RECORD_BLOB_SHA,
+    TASK11_SPEC_LOCK_RECORD_PATH,
+    TASK11_SPEC_PATH,
     TEST_QUESTION_TEMPLATE_ID,
 )
 from research.task11_hypothesis_io import (
     Task10ProductionBundle,
     _json_bytes,
     _validate_output_zip_path,
+    load_task10_production_package,
     write_task11_outputs,
 )
 from research.task11_hypothesis_registry import (
@@ -38,7 +46,71 @@ from research.task11_hypothesis_registry import (
 )
 
 
-_LOWER_SHA1 = re.compile(r"[0-9a-f]{40}\Z")
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_REQUIRED_HEAD_PATHS = (
+    "research/task11_hypothesis_contract.py",
+    "research/task11_hypothesis_io.py",
+    "research/task11_hypothesis_registry.py",
+    "research/run_task11_hypothesis_registration.py",
+    TASK11_SPEC_PATH,
+    TASK11_SPEC_LOCK_RECORD_PATH,
+)
+_SHA1_RE = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def _git(*args: str, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=_REPOSITORY_ROOT,
+        check=False,
+        capture_output=capture_output,
+        text=True,
+    )
+
+
+def assert_clean_committed_task11_worktree() -> str:
+    """Return HEAD only when the locked Task 11 implementation is clean and present."""
+    if _git("diff", "--quiet").returncode != 0:
+        raise RuntimeError("tracked worktree is not clean")
+    if _git("diff", "--cached", "--quiet").returncode != 0:
+        raise RuntimeError("tracked worktree is not clean")
+
+    status = _git(
+        "status", "--porcelain=v1", "--untracked-files=no", capture_output=True
+    )
+    if status.returncode != 0 or status.stdout:
+        raise RuntimeError("tracked worktree is not clean")
+
+    head_result = _git("rev-parse", "HEAD", capture_output=True)
+    head = head_result.stdout.strip()
+    if head_result.returncode != 0 or not _SHA1_RE.fullmatch(head):
+        raise RuntimeError("invalid HEAD SHA")
+
+    if _git("merge-base", "--is-ancestor", TASK11_SPEC_COMMIT, head).returncode != 0:
+        raise RuntimeError("locked Task 11 Spec commit is not an ancestor")
+    if (
+        _git("merge-base", "--is-ancestor", TASK11_SPEC_LOCK_COMMIT, head).returncode
+        != 0
+    ):
+        raise RuntimeError("Task 11 Spec Lock commit is not an ancestor")
+
+    for path in _REQUIRED_HEAD_PATHS:
+        if _git("cat-file", "-e", f"HEAD:{path}").returncode != 0:
+            raise RuntimeError(f"required Task 11 implementation path missing at HEAD: {path}")
+
+    spec_blob = _git("rev-parse", f"HEAD:{TASK11_SPEC_PATH}", capture_output=True)
+    if spec_blob.returncode != 0 or spec_blob.stdout.strip() != TASK11_SPEC_BLOB_SHA:
+        raise RuntimeError("locked Task 11 Spec blob mismatch")
+    lock_blob = _git(
+        "rev-parse", f"HEAD:{TASK11_SPEC_LOCK_RECORD_PATH}", capture_output=True
+    )
+    if (
+        lock_blob.returncode != 0
+        or lock_blob.stdout.strip() != TASK11_SPEC_LOCK_RECORD_BLOB_SHA
+    ):
+        raise RuntimeError("locked Task 11 Spec Lock Record blob mismatch")
+
+    return head
 
 
 def _build_manifest(
@@ -53,7 +125,7 @@ def _build_manifest(
     deterministic_context_pair_count: int,
 ) -> dict[str, object]:
     """Build the closed Task 11 manifest after the source bundle is validated."""
-    if type(implementation_commit) is not str or not _LOWER_SHA1.fullmatch(
+    if type(implementation_commit) is not str or not _SHA1_RE.fullmatch(
         implementation_commit
     ):
         raise ValueError("Task 11 implementation commit must be lowercase SHA-1")
@@ -159,3 +231,45 @@ def _run_task11_from_bundle(
         output_zip=output_zip,
     )
     return manifest
+
+
+def run_task11(
+    input_task10_production: Path,
+    output_dir: Path,
+    *,
+    output_zip: Path,
+) -> dict[str, object]:
+    """Register the locked Task 11 package from its canonical Task 10 input."""
+    implementation_commit = assert_clean_committed_task11_worktree()
+    output_zip = _validate_output_zip_path(output_zip)
+    bundle = load_task10_production_package(input_task10_production)
+    return _run_task11_from_bundle(
+        bundle,
+        output_dir,
+        implementation_commit=implementation_commit,
+        output_zip=output_zip,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the locked Task 11 runtime CLI."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-task10-production", required=True, type=Path)
+    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--output-zip", required=True, type=Path)
+    return parser
+
+
+def main() -> int:
+    """Run Task 11 from the required canonical paths."""
+    arguments = build_parser().parse_args()
+    run_task11(
+        arguments.input_task10_production,
+        arguments.output_dir,
+        output_zip=arguments.output_zip,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
