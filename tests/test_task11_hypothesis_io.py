@@ -91,7 +91,7 @@ def _control_partial() -> dict[str, object]:
 
 def _cross(feature_x: str, feature_y: str, eligible: bool, index: int) -> dict[str, object]:
     return {
-        "controlled_eligible": eligible,
+        "controlled_eligible": "True" if eligible else "False",
         "controlled_rho_H1": 0.1 if eligible else None,
         "controlled_rho_M15": 0.2 if eligible else None,
         "controlled_rho_M30": 0.3 if eligible else None,
@@ -115,8 +115,8 @@ def _cross(feature_x: str, feature_y: str, eligible: bool, index: int) -> dict[s
         "rho_min": 0.11,
         "rho_range": 0.03,
         "sign_agreement_count": 4,
-        "sign_agreement_modal_signs": ["POSITIVE"],
-        "sign_agreement_tie": False,
+        "sign_agreement_modal_signs": '["POSITIVE"]',
+        "sign_agreement_tie": "False",
     }
 
 
@@ -242,6 +242,41 @@ def test_private_loader_loads_complete_frozen_bundle_and_immutable_boundary():
         bundle.manifest["task"] = "changed"  # type: ignore[index]
     with pytest.raises(TypeError):
         bundle.main_dossiers[0]["raw_by_tf"]["M5"]["n_total"] = 0  # type: ignore[index]
+
+
+def test_private_loader_preserves_locked_cross_tf_source_text_without_coercion():
+    bundle = load_synthetic_task10(make_synthetic_task10_production_zip())
+
+    control_cross = bundle.main_dossiers[0]["cross_tf"]
+    eligible_cross = bundle.main_dossiers[12]["cross_tf"]
+    assert control_cross["controlled_eligible"] == "False"
+    assert eligible_cross["controlled_eligible"] == "True"
+    assert control_cross["sign_agreement_tie"] == "False"
+    assert control_cross["sign_agreement_modal_signs"] == '["POSITIVE"]'
+    assert all(
+        type(control_cross[field]) is str
+        for field in (
+            "controlled_eligible",
+            "sign_agreement_tie",
+            "sign_agreement_modal_signs",
+        )
+    )
+
+
+def test_private_loader_rejects_normalized_cross_tf_types():
+    def change(dossiers: list[dict[str, object]]) -> None:
+        cross = dossiers[0]["cross_tf"]
+        assert isinstance(cross, dict)
+        cross["controlled_eligible"] = False
+        cross["sign_agreement_tie"] = False
+        cross["sign_agreement_modal_signs"] = ["POSITIVE"]
+
+    with pytest.raises(ValueError, match="cross_tf.*source text"):
+        load_synthetic_task10(
+            make_synthetic_task10_production_zip(
+                mutate=lambda members: _mutate_main(members, change)
+            )
+        )
 
 
 def test_numeric_validator_accepts_huge_exact_json_integer_without_float_conversion():

@@ -249,18 +249,34 @@ def _validate_cross(name: str, pair_key: str, value: object, feature_x: str, fea
     cross = _exact_keys(name, f"pair_key {pair_key} cross_tf", value, TASK10_CROSS_TF_FIELDS)
     if cross["feature_x"] != feature_x or cross["feature_y"] != feature_y:
         raise ValueError(f"{name}: pair_key {pair_key} cross_tf feature identity conflicts")
-    if type(cross["controlled_eligible"]) is not bool or cross["controlled_eligible"] is not eligible:
-        raise ValueError(f"{name}: pair_key {pair_key} cross_tf controlled eligibility conflicts")
+    expected_controlled_eligible = "True" if eligible else "False"
+    if (
+        type(cross["controlled_eligible"]) is not str
+        or cross["controlled_eligible"] != expected_controlled_eligible
+    ):
+        raise ValueError(
+            f"{name}: pair_key {pair_key} cross_tf controlled_eligible must "
+            f"equal source text {expected_controlled_eligible!r}"
+        )
     for field in ("n_defined_tf", "n_negative_tf", "n_positive_tf", "n_undefined_tf", "n_valid_H1", "n_valid_M15", "n_valid_M30", "n_valid_M5", "n_zero_tf", "sign_agreement_count"):
         _integer(name, f"pair_key {pair_key} cross_tf {field}", cross[field], nullable=field.startswith("n_valid_"))
     if cross["n_defined_tf"] + cross["n_undefined_tf"] != len(TIMEFRAMES):
         raise ValueError(f"{name}: pair_key {pair_key} cross_tf n_defined_tf + n_undefined_tf must equal 4")
     for field in ("controlled_rho_H1", "controlled_rho_M15", "controlled_rho_M30", "controlled_rho_M5", "rho_H1", "rho_M15", "rho_M30", "rho_M5", "rho_max", "rho_min", "rho_range"):
         _number(name, f"pair_key {pair_key} cross_tf {field}", cross[field], nullable=True)
-    if type(cross["sign_agreement_modal_signs"]) is not list or any(type(item) is not str for item in cross["sign_agreement_modal_signs"]):
-        raise ValueError(f"{name}: pair_key {pair_key} cross_tf sign_agreement_modal_signs must be string array")
-    if type(cross["sign_agreement_tie"]) is not bool:
-        raise ValueError(f"{name}: pair_key {pair_key} cross_tf sign_agreement_tie must be boolean")
+    if type(cross["sign_agreement_modal_signs"]) is not str:
+        raise ValueError(
+            f"{name}: pair_key {pair_key} cross_tf "
+            "sign_agreement_modal_signs must be source text"
+        )
+    if (
+        type(cross["sign_agreement_tie"]) is not str
+        or cross["sign_agreement_tie"] not in {"True", "False"}
+    ):
+        raise ValueError(
+            f"{name}: pair_key {pair_key} cross_tf sign_agreement_tie must "
+            "be source text 'True' or 'False'"
+        )
     for field in ("controlled_rho_H1", "controlled_rho_M15", "controlled_rho_M30", "controlled_rho_M5"):
         if not eligible and cross[field] is not None:
             raise ValueError(f"{name}: pair_key {pair_key} cross_tf {field} must be JSON null for control pair")
