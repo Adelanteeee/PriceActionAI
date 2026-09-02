@@ -6,11 +6,9 @@ from research.task11_hypothesis_contract import (
     CONTROL_NOT_APPLICABLE,
     DETERMINISTIC_RELATION_IDS_BY_PAIR_KEY,
     ELIGIBLE,
-    HYPOTHESIS_ID_PREFIX,
     TASK10_CANONICAL_PAIR_KEYS,
     TASK11_HYPOTHESIS_RECORD_FIELDS,
     TASK11_SOURCE_LOCATOR_FIELDS,
-    TEST_QUESTION_TEMPLATE_ID,
     TIMEFRAMES,
 )
 from research.task11_hypothesis_registry import (
@@ -96,7 +94,7 @@ def test_registry_is_exactly_one_record_per_source_pair_in_source_order():
     for source, record in zip(bundle.main_dossiers, registry, strict=True):
         assert record["feature_x"] == source["feature_x"]
         assert record["feature_y"] == source["feature_y"]
-        assert record["hypothesis_id"] == HYPOTHESIS_ID_PREFIX + source["pair_key"]
+        assert record["hypothesis_id"] == "TASK11_HYPOTHESIS__" + source["pair_key"]
 
 
 def test_every_question_is_the_single_locked_literal_template():
@@ -110,7 +108,7 @@ def test_every_question_is_the_single_locked_literal_template():
             f"and {source['feature_y']} remain measurable when their incremental "
             "information contributions are evaluated separately?"
         )
-        assert record["test_question_template_id"] == TEST_QUESTION_TEMPLATE_ID
+        assert record["test_question_template_id"] == "TASK11_PAIRWISE_NEUTRAL_V1"
         assert record["test_question"] == expected
 
 

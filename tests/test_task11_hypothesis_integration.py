@@ -228,7 +228,14 @@ def test_public_flow_writes_guard_commit_to_returned_and_written_manifest(
     assert manifest["task11_implementation_commit"] == "b" * 40
     written_manifest = json.loads((output_dir / "TASK11_MANIFEST.json").read_bytes())
     assert written_manifest["task11_implementation_commit"] == "b" * 40
-    assert output_zip.name == OUTPUT_ZIP_FILENAME
+    logical_payloads = artifact_bytes(output_dir)
+    assert set(logical_payloads) == set(TASK11_LOGICAL_FILENAMES)
+    assert output_zip.is_file()
+    with zipfile.ZipFile(output_zip) as archive:
+        assert archive.namelist() == sorted(TASK11_LOGICAL_FILENAMES)
+        assert {
+            info.filename: archive.read(info) for info in archive.infolist()
+        } == logical_payloads
 
 
 def test_guard_returns_exact_head_for_clean_tracked_repository(
@@ -238,6 +245,21 @@ def test_guard_returns_exact_head_for_clean_tracked_repository(
     repository = _init_guard_repo(tmp_path, monkeypatch)
     expected_head = _git(repository, "rev-parse", "HEAD", capture_output=True).stdout.strip()
     assert assert_clean_committed_task11_worktree() == expected_head
+
+
+def test_guard_ignores_untracked_file_without_touching_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Untracked artifacts are excluded from the tracked provenance boundary."""
+    repository = _init_guard_repo(tmp_path, monkeypatch)
+    expected_head = _git(repository, "rev-parse", "HEAD", capture_output=True).stdout.strip()
+    untracked = repository / "untracked-artifact.txt"
+    payload = b"preserve this untracked artifact\n"
+    untracked.write_bytes(payload)
+
+    assert assert_clean_committed_task11_worktree() == expected_head
+    assert untracked.is_file()
+    assert untracked.read_bytes() == payload
 
 
 @pytest.mark.parametrize("staged", [False, True])
@@ -453,9 +475,11 @@ def test_private_pipeline_is_byte_deterministic_and_scope_locked(tmp_path: Path)
         assert archive.namelist() == sorted(TASK11_LOGICAL_FILENAMES)
         for info in archive.infolist():
             assert info.date_time == (1980, 1, 1, 0, 0, 0)
+            assert info.compress_type == zipfile.ZIP_DEFLATED
             assert info.create_system == 3
             assert info.external_attr >> 16 == 0o100644
             assert info.extra == b""
+            assert archive.read(info) == first_artifacts[info.filename]
 
 
 def test_private_pipeline_rejects_noncanonical_zip_before_output(tmp_path: Path):

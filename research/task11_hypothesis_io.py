@@ -35,19 +35,15 @@ from research.task11_hypothesis_contract import (
     TASK10_MEMBER_SHA256_BY_FILENAME,
     TASK10_PRODUCTION_PACKAGE_SHA256,
     TASK10_RAW_TF_FIELDS,
-    CONTROL_FEATURE_NON_APPLICABLE_COUNT,
     DETERMINISTIC_CONTEXT_PAIR_COUNT,
-    DURATION_CONTROL_ELIGIBLE_COUNT,
     HYPOTHESIS_COUNT,
     HYPOTHESIS_ID_PREFIX,
     LOGICAL_FILE_COUNT,
-    MAIN_PAIR_COUNT,
     OUTPUT_ZIP_FILENAME,
     TASK10_IMPLEMENTATION_COMMIT,
     TASK10_MAIN_DOSSIERS_MEMBER_SHA256,
     TASK10_MANIFEST_MEMBER_SHA256,
     TASK10_PRODUCTION_PACKAGE_FILENAME,
-    TASK10_PRODUCTION_PACKAGE_SHA256,
     TASK11_FALSE_SCOPE_FIELDS,
     TASK11_LOGICAL_FILENAMES,
     TASK11_MANIFEST_FIELDS,
@@ -208,7 +204,9 @@ def _integer(name: str, location: str, value: object, *, nullable: bool = False)
 def _number(name: str, location: str, value: object, *, nullable: bool = False) -> float | int | None:
     if nullable and value is None:
         return None
-    if type(value) not in {int, float} or not math.isfinite(value):
+    if type(value) is int:
+        return value
+    if type(value) is not float or not math.isfinite(value):
         raise ValueError(f"{name}: {location} must be a finite number")
     return value
 

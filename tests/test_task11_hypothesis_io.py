@@ -30,6 +30,7 @@ from research.task11_hypothesis_contract import (
 from research.task11_hypothesis_io import (
     Task10ProductionBundle,
     _load_task10_production_bytes,
+    _number,
     load_task10_production_package,
 )
 
@@ -241,6 +242,13 @@ def test_private_loader_loads_complete_frozen_bundle_and_immutable_boundary():
         bundle.manifest["task"] = "changed"  # type: ignore[index]
     with pytest.raises(TypeError):
         bundle.main_dossiers[0]["raw_by_tf"]["M5"]["n_total"] = 0  # type: ignore[index]
+
+
+def test_numeric_validator_accepts_huge_exact_json_integer_without_float_conversion():
+    """Exact JSON integers must not overflow float-only finite validation."""
+    value = 10**10000
+
+    assert _number(MAIN, "pair_key synthetic raw rho_raw", value) == value
 
 
 def test_private_loader_rejects_duplicate_and_unsafe_members():
