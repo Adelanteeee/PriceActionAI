@@ -10,8 +10,9 @@ from rolling_backtest import run_timeframe, pooled_metrics, VERSIONS
 from research_engine import setup_config_from_json
 from trade_engine import TradeConfig
 
-START = pd.Timestamp('2026-06-10 00:00:00')
-END = pd.Timestamp('2026-09-09 23:59:59.999999')
+# Complete three-calendar-month window available on every tested timeframe.
+START = pd.Timestamp('2026-06-02 00:00:00')
+END = pd.Timestamp('2026-09-02 00:00:00')
 BASE = 'https://raw.githubusercontent.com/simom1/XAUUSD-history/main/Gold-Cash/XAUUSD'
 TFS = ('M5','M15','M30','H1','H4','D1')
 
