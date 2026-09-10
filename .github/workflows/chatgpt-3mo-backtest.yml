@@ -4,8 +4,7 @@ on:
   push:
     branches: [chatgpt-backtest-20260910]
     paths:
-      - 'research/_chatgpt_backtest_20260910/**'
-      - '.github/workflows/chatgpt-3mo-backtest.yml'
+      - 'research/_chatgpt_backtest_20260910/RUN'
 
 jobs:
   backtest:
