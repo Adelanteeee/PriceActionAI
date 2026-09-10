@@ -1,0 +1,35 @@
+name: ChatGPT isolated 3mo backtest
+
+on:
+  push:
+    branches: [chatgpt-backtest-20260910]
+    paths:
+      - 'research/_chatgpt_backtest_20260910/**'
+      - '.github/workflows/chatgpt-3mo-backtest.yml'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pandas numpy scipy
+      - name: Unpack frozen research engine
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          base64 -d package.tgz.b64 > package.tgz
+          mkdir -p btpkg
+          tar -xzf package.tgz -C btpkg
+      - name: Run six-timeframe three-month backtest
+        working-directory: research/_chatgpt_backtest_20260910
+        run: python -u cloud_runner.py
+      - name: Upload exact JSON result
+        uses: actions/upload-artifact@v4
+        with:
+          name: xauusd-3mo-backtest-result
+          path: research/_chatgpt_backtest_20260910/backtest_result.json
+          if-no-files-found: error
