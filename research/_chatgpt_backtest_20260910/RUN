@@ -1,2 +1,5 @@
-run=2026-09-11T21:30:00+03:30
-purpose=inspect-btpkg-v63-annual
+run=2026-09-11T22:40:00+03:30
+purpose=annual-v63-blind-replay-2025
+period=2025-01-01..2026-01-01
+timeframes=M1,M5,M15,M30
+balances=1000,200
