@@ -31,9 +31,68 @@ jobs:
           print('RUNNER_SHA256=', got)
           assert got == want, (got, want)
           PY
-      - name: Run annual blind replay
+      - name: Run annual blind replay on independent M1 source
         working-directory: research/_chatgpt_backtest_20260910
-        run: python -u annual_v63_runner.py
+        run: |
+          python -u - <<'PY'
+          import pandas as pd
+          import annual_v63_runner as r
+
+          BASE = 'https://raw.githubusercontent.com/kevingtlin/Market-Data-Lab/main/xauusd/bid/m1'
+          _CACHE = None
+
+          def _col(cols, names, suffix=None):
+              for n in names:
+                  if n in cols:
+                      return n
+              if suffix:
+                  for c in cols:
+                      if c.endswith(suffix):
+                          return c
+              raise KeyError((names, suffix, cols))
+
+          def load_m1():
+              global _CACHE
+              if _CACHE is not None:
+                  return _CACHE.copy()
+              frames = []
+              months = [(2024,12)] + [(2025,m) for m in range(1,13)]
+              for y,m in months:
+                  url = f'{BASE}/xauusd_bid_m1_{y:04d}_{m:02d}.csv'
+                  x = pd.read_csv(url)
+                  x.columns = [str(c).strip().lower() for c in x.columns]
+                  if not frames:
+                      print('SOURCE_COLUMNS', list(x.columns), flush=True)
+                  tc = _col(list(x.columns), ['time','timestamp','datetime','date'])
+                  oc = _col(list(x.columns), ['open','bid_open'], 'open')
+                  hc = _col(list(x.columns), ['high','bid_high'], 'high')
+                  lc = _col(list(x.columns), ['low','bid_low'], 'low')
+                  cc = _col(list(x.columns), ['close','bid_close'], 'close')
+                  ydf = x[[tc,oc,hc,lc,cc]].rename(columns={tc:'time',oc:'open',hc:'high',lc:'low',cc:'close'})
+                  ydf['time'] = pd.to_datetime(ydf['time'], errors='coerce')
+                  for c in ['open','high','low','close']:
+                      ydf[c] = pd.to_numeric(ydf[c], errors='coerce')
+                  frames.append(ydf.dropna())
+              out = pd.concat(frames, ignore_index=True).sort_values('time').drop_duplicates('time').reset_index(drop=True)
+              out = out[(out.time >= r.WARM) & (out.time < r.END)].reset_index(drop=True)
+              print('SOURCE_M1_RANGE', len(out), out.time.iloc[0], out.time.iloc[-1], flush=True)
+              _CACHE = out
+              return out.copy()
+
+          def patched_load_tf(tf):
+              m1 = load_m1()
+              if tf == 'M1':
+                  return m1
+              mins = r.TFS[tf]
+              x = m1.set_index('time')
+              out = x.resample(f'{mins}min', label='left', closed='left').agg(
+                  open=('open','first'), high=('high','max'), low=('low','min'), close=('close','last')
+              ).dropna().reset_index()
+              return out
+
+          r.load_tf = patched_load_tf
+          r.main()
+          PY
       - name: Upload exact JSON result
         uses: actions/upload-artifact@v4
         with:
