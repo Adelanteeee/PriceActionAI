@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pandas
+        run: python -m pip install --disable-pip-version-check pandas
       - name: Reconstruct runner
         working-directory: research/_chatgpt_backtest_20260910
         run: |
@@ -20,7 +25,36 @@ jobs:
           from pathlib import Path
           raw=zlib.decompress(base64.b64decode(Path('annual_runner.zlib.b64').read_text().strip()))
           Path('annual_v63_runner.py').write_bytes(raw)
-          print(hashlib.sha256(raw).hexdigest())
+          print('RUNNER_SHA256',hashlib.sha256(raw).hexdigest())
+          PY
+      - name: Audit independent M1 source
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          url='https://raw.githubusercontent.com/kevingtlin/Market-Data-Lab/main/xauusd/bid/m1/xauusd_bid_m1_2025_01.csv'
+          x=pd.read_csv(url)
+          print('COLUMNS',list(x.columns))
+          print('ROWS',len(x))
+          print('HEAD')
+          print(x.head(5).to_string(index=False))
+          print('TAIL')
+          print(x.tail(5).to_string(index=False))
+          t=pd.to_datetime(pd.to_numeric(x['timestamp'],errors='coerce'),unit='s',errors='coerce',utc=True).dt.tz_localize(None)
+          y=x.assign(time=t)
+          ohlc=['open','high','low','close']
+          print('TIME_RANGE',y.time.min(),y.time.max())
+          print('OHLC_NA_ROWS',int(y[ohlc].isna().any(axis=1).sum()))
+          wk=y[y.time.dt.dayofweek>=5]
+          print('WEEKEND_ROWS',len(wk))
+          print('WEEKEND_NONNA_ROWS',int((~wk[ohlc].isna().any(axis=1)).sum()))
+          print('WEEKEND_SAMPLE')
+          print(wk[['time']+ohlc].head(10).to_string(index=False))
+          flat=(y['open'].eq(y['high']) & y['high'].eq(y['low']) & y['low'].eq(y['close']))
+          print('FLAT_ROWS',int(flat.sum()))
+          print('FLAT_WEEKEND_ROWS',int((flat & (y.time.dt.dayofweek>=5)).sum()))
+          good=y.dropna(subset=ohlc)
+          print('GOOD_ROWS',len(good))
+          print('GOOD_WEEKEND_ROWS',int((good.time.dt.dayofweek>=5).sum()))
           PY
       - name: Upload runner
         uses: actions/upload-artifact@v4
