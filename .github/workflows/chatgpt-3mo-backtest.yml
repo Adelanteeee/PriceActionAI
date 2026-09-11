@@ -51,6 +51,20 @@ jobs:
                           return c
               raise KeyError((names, suffix, cols))
 
+          def _parse_time(s):
+              num = pd.to_numeric(s, errors='coerce')
+              if num.notna().mean() > 0.95:
+                  med = float(num.dropna().median())
+                  if med > 1e14:
+                      unit = 'ns'
+                  elif med > 1e11:
+                      unit = 'ms'
+                  else:
+                      unit = 's'
+                  return pd.to_datetime(num, unit=unit, errors='coerce', utc=True).dt.tz_localize(None)
+              t = pd.to_datetime(s, errors='coerce', utc=True)
+              return t.dt.tz_localize(None)
+
           def load_m1():
               global _CACHE
               if _CACHE is not None:
@@ -63,17 +77,19 @@ jobs:
                   x.columns = [str(c).strip().lower() for c in x.columns]
                   if not frames:
                       print('SOURCE_COLUMNS', list(x.columns), flush=True)
+                      print('SOURCE_TIME_SAMPLE', x.iloc[0,0], x.iloc[-1,0], flush=True)
                   tc = _col(list(x.columns), ['time','timestamp','datetime','date'])
                   oc = _col(list(x.columns), ['open','bid_open'], 'open')
                   hc = _col(list(x.columns), ['high','bid_high'], 'high')
                   lc = _col(list(x.columns), ['low','bid_low'], 'low')
                   cc = _col(list(x.columns), ['close','bid_close'], 'close')
                   ydf = x[[tc,oc,hc,lc,cc]].rename(columns={tc:'time',oc:'open',hc:'high',lc:'low',cc:'close'})
-                  ydf['time'] = pd.to_datetime(ydf['time'], errors='coerce')
+                  ydf['time'] = _parse_time(ydf['time'])
                   for c in ['open','high','low','close']:
                       ydf[c] = pd.to_numeric(ydf[c], errors='coerce')
                   frames.append(ydf.dropna())
               out = pd.concat(frames, ignore_index=True).sort_values('time').drop_duplicates('time').reset_index(drop=True)
+              print('RAW_M1_RANGE', len(out), out.time.iloc[0], out.time.iloc[-1], flush=True)
               out = out[(out.time >= r.WARM) & (out.time < r.END)].reset_index(drop=True)
               print('SOURCE_M1_RANGE', len(out), out.time.iloc[0], out.time.iloc[-1], flush=True)
               _CACHE = out
