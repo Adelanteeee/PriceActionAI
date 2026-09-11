@@ -1,0 +1,30 @@
+name: ChatGPT audit reconstructed runner
+
+on:
+  push:
+    branches: [chatgpt-backtest-20260910]
+    paths:
+      - 'research/_chatgpt_backtest_20260910/AUDIT'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct runner
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          cat annual_zparts/z*.txt > annual_runner.zlib.b64
+          python - <<'PY'
+          import base64,zlib,hashlib
+          from pathlib import Path
+          raw=zlib.decompress(base64.b64decode(Path('annual_runner.zlib.b64').read_text().strip()))
+          Path('annual_v63_runner.py').write_bytes(raw)
+          print(hashlib.sha256(raw).hexdigest())
+          PY
+      - name: Upload runner
+        uses: actions/upload-artifact@v4
+        with:
+          name: annual-v63-runner-source
+          path: research/_chatgpt_backtest_20260910/annual_v63_runner.py
+          if-no-files-found: error
