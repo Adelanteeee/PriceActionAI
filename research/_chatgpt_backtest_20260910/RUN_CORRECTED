@@ -1,0 +1,6 @@
+run=2026-09-12T13:55:00+03:30
+purpose=corrected-v63-annual-blind-replay-2025
+timeframes=M1,M5,M15,M30
+balances=1000,200
+news_preclose=10,60
+source=MT5-market-bars
