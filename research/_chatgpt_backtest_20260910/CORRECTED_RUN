@@ -1,8 +1,9 @@
-run=2026-09-12T13:58:00+03:30
-purpose=corrected-v63-annual-blind-replay-2025
+run=2026-09-12T14:15:00+03:30
+purpose=corrected-v63-annual-blind-replay-2025-retry-after-byte-verified-reconstruction
 period=2025-01-01..2026-01-01
 timeframes=M1,M5,M15,M30
 balances=1000,200
 news_preclose=10,60
 source=fresh-dukascopy-bid-ask-ignoreFlats
 execution=bid-ask-equity-dd-litefinance-1to500
+runner_sha256=635f1b8cf33c4951f9ad3530c29ad269a053c04e610ab3e43acf376bb2572572
