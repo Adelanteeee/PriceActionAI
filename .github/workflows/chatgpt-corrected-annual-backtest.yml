@@ -1,0 +1,131 @@
+name: ChatGPT corrected annual v6.3 blind replay
+
+on:
+  push:
+    branches: [chatgpt-backtest-20260910]
+    paths:
+      - 'research/_chatgpt_backtest_20260910/CORRECTED_RUN'
+
+jobs:
+  corrected-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pandas numpy scipy
+          npm init -y >/dev/null 2>&1
+          npm install --save-exact dukascopy-node@1.50.0
+          node -e "const p=require('dukascopy-node/package.json'); if(p.version!=='1.50.0') throw new Error(p.version); console.log('DUKASCOPY_NODE_VERSION',p.version)"
+
+      - name: Reconstruct and verify corrected runner
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          cat corrected_parts/part*.b64 > corrected_runner.zlib.b64
+          python - <<'PY'
+          import base64, zlib, hashlib
+          from pathlib import Path
+          encoded=Path('corrected_runner.zlib.b64').read_text().strip()
+          raw=zlib.decompress(base64.b64decode(encoded))
+          Path('corrected_v63_runner.py').write_bytes(raw)
+          got=hashlib.sha256(raw).hexdigest()
+          want='635f1b8cf33c4951f9ad3530c29ad269a053c04e610ab3e43acf376bb2572572'
+          print('CORRECTED_RUNNER_SHA256',got)
+          assert got==want,(got,want)
+          PY
+
+      - name: Run replay unit tests
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          sha256sum test_corrected_v63_runner.py
+          python -u test_corrected_v63_runner.py
+
+      - name: Download fresh bid and ask M1 with flats removed
+        working-directory: research/_chatgpt_backtest_20260910
+        run: node download_dukascopy_corrected.js market_data
+
+      - name: Audit market-data integrity
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          python - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          import pandas as pd
+          out={}
+          dfs={}
+          for side in ('bid','ask'):
+              p=Path('market_data')/f'xauusd_{side}_m1.csv'
+              h=hashlib.sha256(p.read_bytes()).hexdigest()
+              d=pd.read_csv(p)
+              t=pd.to_datetime(pd.to_numeric(d.timestamp),unit='ms',utc=True)
+              assert d.timestamp.is_unique
+              assert d[['open','high','low','close','volume']].notna().all().all()
+              assert (d.volume>0).all()
+              assert len(d)>300000 and len(d)<500000, len(d)
+              dfs[side]=d.assign(time=t)
+              out[side]={'rows':len(d),'first':str(t.iloc[0]),'last':str(t.iloc[-1]),'zero_volume':int((d.volume<=0).sum()),'sha256':h}
+          m=dfs['bid'][['timestamp','time','open','high','low','close']].merge(dfs['ask'][['timestamp','open','high','low','close']],on='timestamp',how='inner',suffixes=('_bid','_ask'))
+          assert len(m)>300000 and len(m)<500000, len(m)
+          gaps=m.time.sort_values().diff().dropna().dt.total_seconds()/60
+          assert (gaps>1).any(), 'no real market-session gaps detected'
+          spread=m.close_ask-m.close_bid
+          assert float((spread>=0).mean())>0.999
+          out['merged']={'rows':len(m),'first':str(m.time.min()),'last':str(m.time.max()),'gaps_gt_1m':int((gaps>1).sum()),'median_spread':float(spread.median()),'nonnegative_close_spread_share':float((spread>=0).mean())}
+          Path('data_integrity.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+
+      - name: Run corrected annual blind replay
+        working-directory: research/_chatgpt_backtest_20260910
+        run: python -u corrected_v63_runner.py
+
+      - name: Validate result matrix
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          x=json.loads(Path('corrected_backtest_result.json').read_text())
+          assert set(x['results'])=={'M1','M5','M15','M30'}
+          versions={'Prominence','Combined','Candle Count Bar v1'}
+          for tf in x['results']:
+              assert set(x['results'][tf])==versions
+              for v in versions:
+                  assert set(x['results'][tf][v])=={'10','60'}
+                  for lead in ('10','60'):
+                      assert set(x['results'][tf][v][lead])=={'1000','200'}
+                      for initial in ('1000','200'):
+                          r=x['results'][tf][v][lead][initial]
+                          for k in ('ending_balance','max_equity_drawdown_pct','closed'):
+                              assert math.isfinite(float(r[k])),(tf,v,lead,initial,k,r[k])
+          print('RESULT_MATRIX_OK')
+          PY
+
+      - name: Write verification hashes
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          sha256sum corrected_v63_runner.py test_corrected_v63_runner.py download_dukascopy_corrected.js corrected_backtest_result.json data_integrity.json > verification_sha256.txt
+          cat verification_sha256.txt
+
+      - name: Upload corrected result package
+        uses: actions/upload-artifact@v4
+        with:
+          name: xauusd-v63-corrected-annual-blind-2025
+          path: |
+            research/_chatgpt_backtest_20260910/corrected_backtest_result.json
+            research/_chatgpt_backtest_20260910/data_integrity.json
+            research/_chatgpt_backtest_20260910/verification_sha256.txt
+            research/_chatgpt_backtest_20260910/corrected_v63_runner.py
+            research/_chatgpt_backtest_20260910/test_corrected_v63_runner.py
+            research/_chatgpt_backtest_20260910/download_dukascopy_corrected.js
+          if-no-files-found: error
