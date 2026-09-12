@@ -1,0 +1,51 @@
+name: ChatGPT corrected v6.3 annual blind replay
+
+on:
+  push:
+    branches: [chatgpt-backtest-20260910]
+    paths:
+      - 'research/_chatgpt_backtest_20260910/RUN_CORRECTED'
+
+jobs:
+  replay:
+    strategy:
+      fail-fast: false
+      matrix:
+        tf: [M1, M5, M15, M30]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pandas numpy scipy
+      - name: Reconstruct locked strategy runner
+        working-directory: research/_chatgpt_backtest_20260910
+        run: |
+          cat annual_zparts/z*.txt > annual_runner.zlib.b64
+          python - <<'PY'
+          import base64,zlib,hashlib
+          from pathlib import Path
+          raw=zlib.decompress(base64.b64decode(Path('annual_runner.zlib.b64').read_text().strip()))
+          Path('annual_v63_runner.py').write_bytes(raw)
+          got=hashlib.sha256(raw).hexdigest()
+          want='c2061f65976eec1b8fcb2bebf5dad8dff0c71d2eb9e0666fcae8eb32e99a2ebe'
+          print('RUNNER_SHA256',got)
+          assert got==want,(got,want)
+          PY
+      - name: Run corrected replay regression tests
+        working-directory: research/_chatgpt_backtest_20260910
+        run: python test_corrected_v63_replay.py
+      - name: Run corrected annual blind replay
+        working-directory: research/_chatgpt_backtest_20260910
+        env:
+          TF: ${{ matrix.tf }}
+        run: python -u corrected_v63_replay.py
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-v63-${{ matrix.tf }}
+          path: research/_chatgpt_backtest_20260910/corrected_result_${{ matrix.tf }}.json
+          if-no-files-found: error
