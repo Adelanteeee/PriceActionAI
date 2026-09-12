@@ -1,0 +1,8 @@
+run=2026-09-12T13:58:00+03:30
+purpose=corrected-v63-annual-blind-replay-2025
+period=2025-01-01..2026-01-01
+timeframes=M1,M5,M15,M30
+balances=1000,200
+news_preclose=10,60
+source=fresh-dukascopy-bid-ask-ignoreFlats
+execution=bid-ask-equity-dd-litefinance-1to500
